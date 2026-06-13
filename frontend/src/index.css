@@ -77,7 +77,7 @@ h1, h2, h3, h4, .brand-title {
 /* Layout Grid */
 .app-container {
   display: grid;
-  grid-template-columns: 260px 1fr;
+  grid-template-columns: 260px minmax(0, 1fr);
   min-height: 100vh;
 }
 
@@ -758,4 +758,211 @@ textarea {
   padding: 1rem;
   border-radius: 10px;
   border: 1px solid var(--panel-border);
+}
+
+/* Mobile Header */
+.mobile-header {
+  display: none;
+  background: rgba(7, 6, 16, 0.95);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border-bottom: 1px solid var(--panel-border);
+  padding: 0.75rem 1rem;
+  align-items: center;
+  gap: 1rem;
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  width: 100%;
+}
+
+.hamburger-btn {
+  background: transparent;
+  border: none;
+  color: white;
+  font-size: 1.5rem;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+}
+
+.mobile-brand {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.sidebar-overlay {
+  display: none;
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  background: rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(4px);
+  z-index: 80;
+}
+
+/* Responsiveness Media Queries */
+@media (max-width: 768px) {
+  .app-container {
+    grid-template-columns: minmax(0, 1fr);
+    min-height: 100vh;
+  }
+
+  .mobile-header {
+    display: flex;
+  }
+
+  .sidebar-overlay {
+    display: block;
+  }
+
+  .sidebar {
+    position: fixed;
+    top: 0;
+    left: -260px;
+    width: 260px;
+    height: 100vh;
+    z-index: 90;
+    background: #0d0a1b;
+    transition: var(--transition-smooth);
+    border-right: 1px solid var(--panel-border);
+  }
+
+  .sidebar.mobile-open {
+    left: 0;
+  }
+
+  .main-content {
+    padding: 1.5rem 1rem;
+    max-height: calc(100vh - 50px);
+    min-width: 0;
+  }
+
+  .page-title {
+    font-size: 1.5rem;
+  }
+
+  .page-subtitle {
+    font-size: 0.875rem;
+  }
+
+  /* Stats cards */
+  .stats-grid {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 1rem;
+    margin-bottom: 1.5rem;
+  }
+
+  .stat-card {
+    padding: 1rem;
+  }
+
+  .stat-value {
+    font-size: 1.75rem;
+  }
+
+  /* Actions bar scrollable tabs */
+  .actions-bar {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 1rem;
+  }
+
+  .tabs-container {
+    overflow-x: auto;
+    width: 100%;
+    display: flex;
+    padding: 0.15rem;
+  }
+
+  .tab-btn {
+    flex-shrink: 0;
+    padding: 0.5rem 0.75rem;
+    font-size: 0.85rem;
+  }
+
+  /* Job Cards */
+  .job-card {
+    grid-template-columns: 1fr;
+    gap: 1rem;
+    padding: 1.25rem;
+  }
+
+  .job-primary-info {
+    padding-right: 70px;
+  }
+
+  .job-title-row {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.25rem;
+  }
+
+  .job-card > div:nth-child(2) {
+    /* Status Badge */
+    display: flex;
+    justify-content: flex-start;
+  }
+
+  .job-card > div:nth-child(3) {
+    /* Score Pill */
+    position: absolute;
+    top: 1.25rem;
+    right: 1.25rem;
+  }
+
+  .job-card > div:nth-child(4) {
+    /* Action Buttons */
+    width: 100%;
+  }
+
+  .job-card .btn {
+    width: 100%;
+    justify-content: center;
+  }
+
+  /* Modals / Drawers */
+  .modal-overlay {
+    justify-content: center;
+    align-items: flex-end;
+  }
+
+  .modal-content {
+    width: 100vw;
+    height: 85vh;
+    border-left: none;
+    border-radius: 20px 20px 0 0;
+    padding: 1.5rem;
+    animation: slideUp 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  @keyframes slideUp {
+    from { transform: translateY(100%); }
+    to { transform: translateY(0); }
+  }
+
+  .modal-score-section {
+    flex-direction: column;
+    text-align: center;
+    align-items: center;
+    gap: 1rem;
+  }
+  
+  /* Scraper layout on mobile */
+  .scraper-layout {
+    gap: 1rem;
+  }
+}
+
+@media (max-width: 480px) {
+  .stats-grid {
+    grid-template-columns: 1fr;
+  }
+  
+  .modal-content {
+    padding: 1rem;
+  }
 }

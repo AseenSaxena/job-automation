@@ -20,6 +20,12 @@ function App() {
   const [statusFilter, setStatusFilter] = useState('all');
   const [saveStatus, setSaveStatus] = useState('');
   const [uploadingResume, setUploadingResume] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+
+  const handleTabClick = (tab) => {
+    setCurrentTab(tab);
+    setSidebarOpen(false);
+  };
 
   const terminalEndRef = useRef(null);
 
@@ -292,8 +298,24 @@ function App() {
 
   return (
     <div className="app-container">
+      {/* Mobile Header */}
+      <header className="mobile-header">
+        <button className="hamburger-btn" onClick={() => setSidebarOpen(true)}>
+          ☰
+        </button>
+        <div className="mobile-brand">
+          <div className="brand-icon" style={{ width: '30px', height: '30px', fontSize: '0.9rem', borderRadius: '6px' }}>J</div>
+          <span className="brand-title" style={{ fontSize: '1.1rem' }}>JobBot AI</span>
+        </div>
+      </header>
+
+      {/* Sidebar Overlay */}
+      {sidebarOpen && (
+        <div className="sidebar-overlay" onClick={() => setSidebarOpen(false)} />
+      )}
+
       {/* Sidebar Navigation */}
-      <aside className="sidebar">
+      <aside className={`sidebar ${sidebarOpen ? 'mobile-open' : ''}`}>
         <div>
           <div className="brand-section">
             <div className="brand-icon">J</div>
@@ -303,25 +325,25 @@ function App() {
           <nav className="nav-links">
             <div 
               className={`nav-item ${currentTab === 'dashboard' ? 'active' : ''}`}
-              onClick={() => setCurrentTab('dashboard')}
+              onClick={() => handleTabClick('dashboard')}
             >
               <span className="nav-icon">📊</span> Dashboard
             </div>
             <div 
               className={`nav-item ${currentTab === 'search' ? 'active' : ''}`}
-              onClick={() => setCurrentTab('search')}
+              onClick={() => handleTabClick('search')}
             >
               <span className="nav-icon">🔍</span> LinkedIn Bot Search
             </div>
             <div 
               className={`nav-item ${currentTab === 'login' ? 'active' : ''}`}
-              onClick={() => setCurrentTab('login')}
+              onClick={() => handleTabClick('login')}
             >
               <span className="nav-icon">🔑</span> LinkedIn Login Helper
             </div>
             <div 
               className={`nav-item ${currentTab === 'settings' ? 'active' : ''}`}
-              onClick={() => setCurrentTab('settings')}
+              onClick={() => handleTabClick('settings')}
             >
               <span className="nav-icon">⚙️</span> Settings & Resume
             </div>
