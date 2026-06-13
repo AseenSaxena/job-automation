@@ -1,16 +1,21 @@
-const { GoogleGenerativeAI } = require('@google/generative-ai');
 const db = require('./db');
+
+// Predefined catalog of core technical skills for keyword matching
+const COMMON_SKILLS = [
+  'react', 'angular', 'vue', 'next.js', 'nextjs', 'nuxt', 'svelte', 'solidjs',
+  'javascript', 'typescript', 'js', 'ts', 'html', 'css', 'sass', 'less', 'tailwind', 'bootstrap',
+  'node.js', 'nodejs', 'node', 'express', 'nest.js', 'nestjs', 'graphql', 'rest api', 'restful api',
+  'redux', 'mobx', 'zustand', 'context api', 'webpack', 'vite', 'git', 'github', 'docker', 'kubernetes',
+  'aws', 'azure', 'gcp', 'sql', 'mysql', 'postgresql', 'sqlite', 'mongodb', 'redis', 'firebase', 'prisma',
+  'jest', 'mocha', 'cypress', 'playwright', 'testing library', 'ci/cd', 'devops', 'websockets', 'agile'
+];
 
 async function analyzeJob(jobId) {
   const settings = await db.getSettings();
-  const apiKey = settings.gemini_key;
-  const resume = settings.resume;
+  const resume = settings.resume || '';
 
-  if (!apiKey) {
-    throw new Error('Gemini API key is missing. Please add it in settings.');
-  }
-  if (!resume) {
-    throw new Error('Resume text is missing. Please add it in settings.');
+  if (!resume || resume.trim().length === 0) {
+    throw new Error('Resume text is missing. Please upload a resume PDF or write text in settings first.');
   }
 
   // Get job details from DB
@@ -21,55 +26,112 @@ async function analyzeJob(jobId) {
     throw new Error('Job not found.');
   }
 
-  const genAI = new GoogleGenerativeAI(apiKey);
-  // Using gemini-1.5-flash as it is fast, cheap, and very capable of resume scoring
-  const model = genAI.getGenerativeModel({ 
-    model: 'gemini-1.5-flash',
-    generationConfig: {
-      responseMimeType: "application/json"
+  const jobDescLower = job.description.toLowerCase();
+  const resumeLower = resume.toLowerCase();
+
+  // Find overlapping skills
+  const jobSkills = [];
+  const resumeSkills = [];
+
+  COMMON_SKILLS.forEach(skill => {
+    // Escape special characters for regex matching
+    const escapedSkill = skill.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
+    const skillRegex = new RegExp(`\\b${escapedSkill}\\b`, 'i');
+    
+    // Check if skill is in job description
+    if (skillRegex.test(jobDescLower)) {
+      jobSkills.push(skill);
+      // Check if skill is also in resume
+      if (skillRegex.test(resumeLower)) {
+        resumeSkills.push(skill);
+      }
     }
   });
 
-  const prompt = `
-You are an expert technical recruiter and resume writer. 
-Compare the user's resume with the job description below.
-Determine the fit, identify missing skills, suggest improvements, and draft a high-impact, custom cover letter.
+  // Calculate Match Score (ATS-Style keyword overlap)
+  let matchScore = 70; // default base score
+  const missingSkills = [];
 
-Resume:
-"""
-${resume}
-"""
-
-Job Description (Title: "${job.title}" at "${job.company}"):
-"""
-${job.description}
-"""
-
-You must respond with a JSON object containing exactly the following structure:
-{
-  "matchScore": 85, // An integer between 0 and 100
-  "missingSkills": ["Tailwind CSS", "GraphQL"], // Array of technologies/skills mentioned in job desc but missing/weak in resume
-  "resumeSuggestions": ["Add experience with Next.js App router under your recent project", "Highlight React performance optimization techniques"], // Concrete suggestions for editing resume to fit this role
-  "coverLetter": "Dear Hiring Manager... (A compelling, professional 200-300 word cover letter showcasing relevant achievements from the resume matching the job requirements)"
-}
-`;
-
-  const result = await model.generateContent(prompt);
-  const responseText = result.response.text();
-  
-  let analysis;
-  try {
-    analysis = JSON.parse(responseText);
-  } catch (err) {
-    console.error("Failed to parse Gemini response as JSON. Raw response:", responseText);
-    throw new Error("Invalid response from Gemini AI: " + err.message);
+  if (jobSkills.length > 0) {
+    const matchedCount = resumeSkills.length;
+    matchScore = Math.round((matchedCount / jobSkills.length) * 100);
+    
+    // Determine missing skills
+    jobSkills.forEach(skill => {
+      if (!resumeSkills.includes(skill)) {
+        // Capitalize for display
+        const displaySkill = skill.split('.').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join('.');
+        missingSkills.push(displaySkill);
+      }
+    });
+  } else {
+    // Fallback: check general keyword match
+    const words = jobDescLower.split(/\W+/).filter(w => w.length > 4);
+    const uniqueWords = [...new Set(words)];
+    let matchCount = 0;
+    uniqueWords.forEach(w => {
+      if (resumeLower.includes(w)) matchCount++;
+    });
+    matchScore = uniqueWords.length > 0 ? Math.round((matchCount / uniqueWords.length) * 100) : 75;
   }
 
-  // Ensure fields are correctly typed/present
-  analysis.matchScore = Math.min(100, Math.max(0, parseInt(analysis.matchScore) || 0));
-  analysis.missingSkills = Array.isArray(analysis.missingSkills) ? analysis.missingSkills : [];
-  analysis.resumeSuggestions = Array.isArray(analysis.resumeSuggestions) ? analysis.resumeSuggestions : [];
-  analysis.coverLetter = typeof analysis.coverLetter === 'string' ? analysis.coverLetter : '';
+  // Clamp score between 0 and 100
+  matchScore = Math.min(100, Math.max(10, matchScore));
+
+  // Generate suggestions based on missing keywords
+  const resumeSuggestions = [];
+  if (missingSkills.length > 0) {
+    missingSkills.slice(0, 3).forEach(skill => {
+      resumeSuggestions.push(`Add a project or bullet point highlighting your experience with "${skill}".`);
+    });
+    resumeSuggestions.push(`Mention key terms like ${missingSkills.slice(0, 4).join(', ')} directly in your skills section.`);
+  } else {
+    resumeSuggestions.push("Your resume matches the core technical stack perfectly!");
+  }
+  resumeSuggestions.push("Quantify your accomplishments (e.g., 'improved page speeds by 30%', 'reduced loading times') rather than just listing tasks.");
+
+  // Extract Name from Resume (assumes first line might contain the candidate's name)
+  const resumeLines = resume.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+  let candidateName = '[Your Name]';
+  if (resumeLines.length > 0) {
+    const firstLine = resumeLines[0];
+    if (firstLine.split(/\s+/).length <= 4 && !firstLine.includes('@') && !firstLine.includes('http')) {
+      candidateName = firstLine;
+    }
+  }
+
+  // Format skills for cover letter
+  const skillsListText = resumeSkills.length > 0 
+    ? resumeSkills.slice(0, 5).map(s => s.split('.').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join('.')).join(', ')
+    : 'modern web development standards';
+
+  // Generate Template Cover Letter
+  const coverLetter = `Dear Hiring Team at ${job.company},
+
+I am writing to express my enthusiastic interest in the ${job.title} position at your company. Based on my technical background and experience in designing user-focused software applications, I am confident in my ability to hit the ground running and add immediate value.
+
+The technical requirements outlined in your job posting match my experience well. In my previous work, I have designed, developed, and maintained applications using ${skillsListText}. I focus on writing clean, modular, and performance-optimized code while collaborating in agile team environments to deliver high-quality outcomes.
+
+Specifically, I bring:
+- Strong experience building interactive front-end layouts and robust logic flows.
+- Proven capability in API integration, state management, and debugging complex software components.
+- A user-centric design approach focused on maximizing page responsiveness and usability.
+
+I am particularly excited about the chance to join ${job.company} because of your team's commitment to building premium digital experiences. I welcome the opportunity to discuss my qualifications and how my skill set can support your team's goals.
+
+Thank you for your time and consideration.
+
+Sincerely,
+
+${candidateName}
+(as matching your profile)`;
+
+  const analysis = {
+    matchScore,
+    missingSkills,
+    resumeSuggestions,
+    coverLetter
+  };
 
   // Save analysis to DB
   await db.updateJobAnalysis(jobId, analysis);

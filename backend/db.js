@@ -117,7 +117,7 @@ async function saveSettings(settings) {
   for (const [key, value] of Object.entries(settings)) {
     const stringValue = typeof value === 'object' ? JSON.stringify(value) : String(value);
     await database.run(
-      'INSERT INTO settings (key, value) ON CONFLICT(key) DO UPDATE SET value = excluded.value',
+      'REPLACE INTO settings (key, value) VALUES (?, ?)',
       [key, stringValue]
     );
   }

@@ -3,8 +3,11 @@ const cors = require('cors');
 const fs = require('fs');
 const path = require('path');
 require('dotenv').config();
+const multer = require('multer');
+const { PDFParse } = require('pdf-parse');
 
 const db = require('./db');
+const upload = multer({ storage: multer.memoryStorage() });
 const scraper = require('./scraper');
 const ai = require('./ai');
 
@@ -149,6 +152,33 @@ app.post('/api/jobs/:id/analyze', async (req, res) => {
     res.json({ success: true, analysis });
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/resume/upload
+app.post('/api/resume/upload', upload.single('resume'), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: 'No file uploaded.' });
+    }
+    
+    const dataBuffer = req.file.buffer;
+    const parser = new PDFParse({ data: dataBuffer });
+    const result = await parser.getText();
+    const text = result.text;
+    await parser.destroy();
+    
+    if (!text || text.trim().length === 0) {
+      return res.status(400).json({ error: 'Could not extract any text from the PDF. Ensure it is not a scanned image PDF.' });
+    }
+
+    // Save to settings DB
+    await db.saveSettings({ resume: text });
+    
+    res.json({ success: true, text });
+  } catch (err) {
+    console.error("PDF Parsing Error:", err);
+    res.status(500).json({ error: 'Failed to parse PDF resume: ' + err.message });
   }
 });
 

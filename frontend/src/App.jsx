@@ -19,6 +19,7 @@ function App() {
   const [analyzingJobId, setAnalyzingJobId] = useState(null);
   const [statusFilter, setStatusFilter] = useState('all');
   const [saveStatus, setSaveStatus] = useState('');
+  const [uploadingResume, setUploadingResume] = useState(false);
 
   const terminalEndRef = useRef(null);
 
@@ -92,6 +93,39 @@ function App() {
       setLoginStatus(data.authenticated);
     } catch (err) {
       console.error("Failed to fetch login status:", err);
+    }
+  };
+
+  const handleResumePdfUpload = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    if (file.type !== 'application/pdf') {
+      alert('Please select a PDF file.');
+      return;
+    }
+
+    setUploadingResume(true);
+    const formData = new FormData();
+    formData.append('resume', file);
+
+    try {
+      const res = await fetch(`${API_URL}/resume/upload`, {
+        method: 'POST',
+        body: formData
+      });
+      const data = await res.json();
+      if (data.success) {
+        setSettings(prev => ({ ...prev, resume: data.text }));
+        alert('Resume uploaded and text extracted successfully!');
+      } else {
+        alert(`Failed to extract text: ${data.error}`);
+      }
+    } catch (err) {
+      console.error(err);
+      alert('Network error uploading resume.');
+    } finally {
+      setUploadingResume(false);
     }
   };
 
@@ -186,6 +220,24 @@ function App() {
     setScrapingActive(true);
     setScraperLogs([]); // Clear screen
     try {
+      // Auto-save search parameters first so changes are used by the scraper
+      const parsedKeywords = keywordInput
+        .split(',')
+        .map(k => k.trim())
+        .filter(k => k.length > 0);
+
+      const payload = {
+        ...settings,
+        keywords: parsedKeywords
+      };
+
+      await fetch(`${API_URL}/settings`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      setSettings(payload);
+
       const res = await fetch(`${API_URL}/scrape`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -410,23 +462,38 @@ function App() {
               <div className="glass-panel settings-group">
                 <h3 style={{ fontFamily: 'Outfit' }}>Search parameters</h3>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', fontSize: '0.9rem', color: 'var(--text-secondary)' }}>
-                  <div>
-                    <label>Keywords</label>
-                    <div style={{ color: 'white', fontWeight: 500, marginTop: '0.25rem' }}>
-                      {Array.isArray(settings.keywords) ? settings.keywords.join(', ') : 'None configured'}
-                    </div>
+                  <div className="form-group">
+                    <label htmlFor="keywords-quick">Keywords</label>
+                    <input 
+                      type="text" 
+                      id="keywords-quick" 
+                      value={keywordInput} 
+                      onChange={(e) => setKeywordInput(e.target.value)}
+                      placeholder="e.g. React, Frontend" 
+                    />
                   </div>
-                  <div>
-                    <label>Location</label>
-                    <div style={{ color: 'white', fontWeight: 500, marginTop: '0.25rem' }}>
-                      {settings.location || 'None configured'}
-                    </div>
+                  <div className="form-group">
+                    <label htmlFor="location-quick">Location</label>
+                    <input 
+                      type="text" 
+                      id="location-quick" 
+                      value={settings.location || ''} 
+                      onChange={(e) => setSettings({...settings, location: e.target.value})}
+                      placeholder="e.g. India or Remote" 
+                    />
                   </div>
-                  <div>
-                    <label>Experience Filter</label>
-                    <div style={{ color: 'white', fontWeight: 500, marginTop: '0.25rem' }}>
-                      {settings.experience || 'None configured'}
-                    </div>
+                  <div className="form-group">
+                    <label htmlFor="experience-quick">Experience Filter</label>
+                    <select 
+                      id="experience-quick" 
+                      value={settings.experience || ''} 
+                      onChange={(e) => setSettings({...settings, experience: e.target.value})}
+                    >
+                      <option value="all">No Filter (All Levels)</option>
+                      <option value="entry">Entry Level (0-2 years)</option>
+                      <option value="associate">Associate / Mid Level (2-5 years)</option>
+                      <option value="mid-senior">Mid-Senior / Senior (5+ years)</option>
+                    </select>
                   </div>
                   <div className="form-group" style={{ marginTop: '0.5rem' }}>
                     <label htmlFor="maxJobs">Max Jobs to Scrape</label>
@@ -438,6 +505,45 @@ function App() {
                       min="1" 
                       max="40" 
                     />
+                  </div>
+                  
+                  <div className="form-group" style={{ marginTop: '0.5rem' }}>
+                    <label>Resume Profile (PDF)</label>
+                    <input 
+                      type="file" 
+                      id="resume-pdf-upload"
+                      accept=".pdf"
+                      onChange={handleResumePdfUpload}
+                      disabled={uploadingResume}
+                      style={{ display: 'none' }}
+                    />
+                    <label 
+                      htmlFor="resume-pdf-upload" 
+                      className="btn" 
+                      style={{ display: 'flex', justifyContent: 'center', cursor: 'pointer', padding: '0.5rem 1rem', marginTop: '0.25rem', background: 'rgba(255,255,255,0.06)' }}
+                    >
+                      {uploadingResume ? '⏳ Parsing Resume PDF...' : '📄 Upload Resume PDF'}
+                    </label>
+                    {settings.resume ? (
+                      <span style={{ fontSize: '0.75rem', color: '#10b981', marginTop: '0.25rem', textAlign: 'center', display: 'block' }}>
+                        ✓ Extracted {settings.resume.length} characters
+                      </span>
+                    ) : (
+                      <span style={{ fontSize: '0.75rem', color: '#ef4444', marginTop: '0.25rem', textAlign: 'center', display: 'block' }}>
+                        ✗ No resume text configured
+                      </span>
+                    )}
+                  </div>
+
+                  <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.5rem', alignItems: 'center' }}>
+                    <button 
+                      className="btn" 
+                      style={{ flex: 1, padding: '0.5rem', display: 'flex', justifyContent: 'center' }} 
+                      onClick={handleSaveSettings}
+                    >
+                      💾 Save Parameters
+                    </button>
+                    {saveStatus && <span style={{ fontSize: '0.75rem', color: '#a78bfa', fontWeight: 600 }}>{saveStatus}</span>}
                   </div>
                 </div>
 
@@ -529,7 +635,7 @@ function App() {
           <div>
             <header className="page-header">
               <h2 className="page-title">System Settings</h2>
-              <p className="page-subtitle">Configure search parameters, load your resume details, and enter your AI access token.</p>
+              <p className="page-subtitle">Configure search parameters and load your resume profile for local match scoring.</p>
             </header>
 
             <form onSubmit={handleSaveSettings} className="glass-panel settings-group">
@@ -576,17 +682,6 @@ function App() {
                     </select>
                   </div>
 
-                  <h3 style={{ borderBottom: '1px solid var(--panel-border)', paddingBottom: '0.5rem', marginTop: '1rem' }}>Google Gemini AI</h3>
-                  <div className="form-group">
-                    <label htmlFor="geminiKey">Gemini API Key</label>
-                    <input 
-                      type="password" 
-                      id="geminiKey" 
-                      value={settings.gemini_key || ''} 
-                      onChange={(e) => setSettings({...settings, gemini_key: e.target.value})}
-                      placeholder="Enter Gemini API key"
-                    />
-                  </div>
                 </div>
 
                 {/* Right col: Resume text area */}
@@ -598,7 +693,7 @@ function App() {
                       id="resumeText" 
                       value={settings.resume || ''} 
                       onChange={(e) => setSettings({...settings, resume: e.target.value})}
-                      placeholder="Paste your resume contents here. The Gemini model will use this text to score jobs and draft tailored cover letters."
+                      placeholder="Paste your resume contents here. The local matching algorithm will use this text to score jobs and draft tailored cover letters."
                       style={{ height: '240px', flexGrow: 1 }}
                       required
                     />
@@ -671,11 +766,11 @@ function App() {
                   {selectedJob.match_score !== null ? `${selectedJob.match_score}%` : '—'}
                 </div>
                 <div>
-                  <h3 style={{ fontSize: '1.1rem' }}>AI Matching Score</h3>
+                  <h3 style={{ fontSize: '1.1rem' }}>Local Matching Score</h3>
                   <p style={{ color: 'var(--text-secondary)', fontSize: '0.875rem', marginTop: '0.25rem' }}>
                     {selectedJob.match_score !== null 
-                      ? `Gemini scored this job as a ${selectedJob.match_score}% match against your resume profile.`
-                      : 'Run AI match scoring to evaluate fit and retrieve resume optimization tips.'}
+                      ? `The local ATS-matching algorithm scored this job as a ${selectedJob.match_score}% match against your resume profile.`
+                      : 'Run local match scoring to evaluate fit and retrieve resume optimization tips.'}
                   </p>
                   {selectedJob.match_score === null && (
                     <button 
@@ -684,7 +779,7 @@ function App() {
                       onClick={() => handleAnalyzeJob(selectedJob.id)}
                       disabled={analyzingJobId === selectedJob.id}
                     >
-                      {analyzingJobId === selectedJob.id ? 'Scoring details with Gemini...' : '🤖 Analyze and Score Match'}
+                      {analyzingJobId === selectedJob.id ? 'Calculating match score...' : '🤖 Analyze and Score Match'}
                     </button>
                   )}
                 </div>
