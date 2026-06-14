@@ -57,7 +57,13 @@ function App() {
     experience: ''
   });
   const [keywordInput, setKeywordInput] = useState('');
-  const [loginStatus, setLoginStatus] = useState(false);
+  const [loginStatus, setLoginStatus] = useState({
+    linkedin: false,
+    naukri: false,
+    ziprecruiter: false,
+    ycombinator: false,
+    cutshort: false
+  });
   const [selectedJob, setSelectedJob] = useState(null);
   const [scraperLogs, setScraperLogs] = useState([]);
   const [maxJobsInput, setMaxJobsInput] = useState(10);
@@ -71,10 +77,12 @@ function App() {
   const [scoreFilter, setScoreFilter] = useState('all');
   const [dateFilter, setDateFilter] = useState('all');
   const [sortBy, setSortBy] = useState('newest');
+  const [selectedPortals, setSelectedPortals] = useState(['linkedin']);
+  const [portalFilter, setPortalFilter] = useState('all');
 
   useEffect(() => {
     setSelectedJobIds([]);
-  }, [statusFilter, scoreFilter, dateFilter, sortBy]);
+  }, [statusFilter, scoreFilter, dateFilter, sortBy, portalFilter]);
 
   const handleTabClick = (tab) => {
     setCurrentTab(tab);
@@ -150,7 +158,7 @@ function App() {
     try {
       const res = await fetch(`${API_URL}/login-status`);
       const data = await res.json();
-      setLoginStatus(data.authenticated);
+      setLoginStatus(data);
     } catch (err) {
       console.error("Failed to fetch login status:", err);
     }
@@ -342,7 +350,7 @@ function App() {
       const res = await fetch(`${API_URL}/scrape`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ maxJobs: maxJobsInput })
+        body: JSON.stringify({ maxJobs: maxJobsInput, portals: selectedPortals })
       });
       const data = await res.json();
       if (!data.success) {
@@ -354,15 +362,21 @@ function App() {
     }
   };
 
-  const handleLinkedInLogin = async () => {
+  const handlePortalLogin = async (portal) => {
     try {
       setScraperLogs([]); // Clear logs for login output
       setCurrentTab('search'); // Send user to search page to watch logs
-      await fetch(`${API_URL}/login-linkedin`, { method: 'POST' });
+      await fetch(`${API_URL}/login-portal`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ portal })
+      });
     } catch (err) {
       console.error(err);
     }
   };
+
+  const handleLinkedInLogin = () => handlePortalLogin('linkedin');
 
   const copyToClipboard = (text) => {
     navigator.clipboard.writeText(text);
@@ -405,6 +419,9 @@ function App() {
         if (dateFilter === 'week' && diffHours > 24 * 7) return false;
         if (dateFilter === 'month' && diffHours > 24 * 30) return false;
       }
+
+      // 4. Portal Filter
+      if (portalFilter !== 'all' && (job.portal || 'linkedin') !== portalFilter) return false;
 
       return true;
     })
@@ -470,13 +487,13 @@ function App() {
               className={`nav-item ${currentTab === 'search' ? 'active' : ''}`}
               onClick={() => handleTabClick('search')}
             >
-              <span className="nav-icon">🔍</span> LinkedIn Bot Search
+              <span className="nav-icon">🔍</span> Job Bot Search
             </div>
             <div 
               className={`nav-item ${currentTab === 'login' ? 'active' : ''}`}
               onClick={() => handleTabClick('login')}
             >
-              <span className="nav-icon">🔑</span> LinkedIn Login Helper
+              <span className="nav-icon">🔑</span> Job Portal Login Helper
             </div>
             <div 
               className={`nav-item ${currentTab === 'settings' ? 'active' : ''}`}
@@ -488,11 +505,11 @@ function App() {
         </div>
 
         <div className="user-status">
-          <div className={`status-indicator ${loginStatus ? 'online' : 'offline'}`}></div>
+          <div className={`status-indicator ${Object.values(loginStatus).filter(Boolean).length > 0 ? 'online' : 'offline'}`}></div>
           <div>
-            <div style={{ fontSize: '0.85rem', fontWeight: 600 }}>LinkedIn Sync</div>
+            <div style={{ fontSize: '0.85rem', fontWeight: 600 }}>Portal Sync Status</div>
             <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
-              {loginStatus ? 'Connected' : 'Session Expired / Not Setup'}
+              {Object.values(loginStatus).filter(Boolean).length} / 5 Active
             </div>
           </div>
         </div>
@@ -576,6 +593,22 @@ function App() {
                     <option value="24h">Past 24 Hours</option>
                     <option value="week">Past Week</option>
                     <option value="month">Past Month</option>
+                  </select>
+                </div>
+
+                <div className="control-item">
+                  <label htmlFor="portal-filter-select">Portal</label>
+                  <select 
+                    id="portal-filter-select"
+                    value={portalFilter} 
+                    onChange={(e) => setPortalFilter(e.target.value)}
+                  >
+                    <option value="all">All Portals</option>
+                    <option value="linkedin">LinkedIn</option>
+                    <option value="naukri">Naukri</option>
+                    <option value="ziprecruiter">ZipRecruiter</option>
+                    <option value="ycombinator">YCombinator</option>
+                    <option value="cutshort">Cutshort</option>
                   </select>
                 </div>
               </div>
@@ -672,9 +705,29 @@ function App() {
                       </div>
                     </div>
 
-                    <div className="job-card-badge-wrapper">
+                    <div className="job-card-badge-wrapper" style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem', alignItems: 'flex-start' }}>
                       <span className={`badge badge-status-${job.status}`}>
                         {job.status}
+                      </span>
+                      <span className="badge" style={{ 
+                        background: (job.portal || 'linkedin') === 'linkedin' ? 'rgba(10, 102, 194, 0.15)' :
+                                    (job.portal || 'linkedin') === 'naukri' ? 'rgba(74, 144, 226, 0.15)' :
+                                    (job.portal || 'linkedin') === 'ziprecruiter' ? 'rgba(0, 204, 102, 0.15)' :
+                                    (job.portal || 'linkedin') === 'ycombinator' ? 'rgba(255, 102, 0, 0.15)' :
+                                    'rgba(185, 28, 28, 0.15)',
+                        color: (job.portal || 'linkedin') === 'linkedin' ? '#0a66c2' :
+                               (job.portal || 'linkedin') === 'naukri' ? '#4a90e2' :
+                               (job.portal || 'linkedin') === 'ziprecruiter' ? '#00cc66' :
+                               (job.portal || 'linkedin') === 'ycombinator' ? '#ff6600' :
+                               '#f87171',
+                        border: (job.portal || 'linkedin') === 'linkedin' ? '1px solid rgba(10, 102, 194, 0.3)' :
+                                (job.portal || 'linkedin') === 'naukri' ? '1px solid rgba(74, 144, 226, 0.3)' :
+                                (job.portal || 'linkedin') === 'ziprecruiter' ? '1px solid rgba(0, 204, 102, 0.3)' :
+                                (job.portal || 'linkedin') === 'ycombinator' ? '1px solid rgba(255, 102, 0, 0.3)' :
+                                '1px solid rgba(185, 28, 28, 0.3)',
+                        textTransform: 'capitalize'
+                      }}>
+                        🔑 {job.portal || 'linkedin'}
                       </span>
                     </div>
 
@@ -721,7 +774,7 @@ function App() {
           <div>
             <header className="page-header">
               <h2 className="page-title">Scraper Control Center</h2>
-              <p className="page-subtitle">Configure search params and execute the Playwright LinkedIn browser bot.</p>
+              <p className="page-subtitle">Configure search params and execute the multi-portal browser scraping bots.</p>
             </header>
 
             <div className="scraper-layout">
@@ -801,6 +854,29 @@ function App() {
                       </span>
                     )}
                   </div>
+                  
+                  <div className="form-group" style={{ marginTop: '0.75rem' }}>
+                    <label>Target Job Portals</label>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '0.5rem', marginTop: '0.25rem', padding: '0.75rem', background: 'rgba(0,0,0,0.15)', borderRadius: '8px', border: '1px solid var(--panel-border)' }}>
+                      {['linkedin', 'naukri', 'ziprecruiter', 'ycombinator', 'cutshort'].map(p => (
+                        <label key={p} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer', textTransform: 'capitalize', fontSize: '0.8rem', fontWeight: 500, color: 'var(--text-primary)' }}>
+                          <input 
+                            type="checkbox" 
+                            checked={selectedPortals.includes(p)}
+                            onChange={(e) => {
+                              if (e.target.checked) {
+                                setSelectedPortals([...selectedPortals, p]);
+                              } else {
+                                setSelectedPortals(selectedPortals.filter(x => x !== p));
+                              }
+                            }}
+                            style={{ cursor: 'pointer', width: '14px', height: '14px', margin: 0 }}
+                          />
+                          {p === 'ycombinator' ? 'YCombinator' : p}
+                        </label>
+                      ))}
+                    </div>
+                  </div>
 
                   <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.5rem', alignItems: 'center' }}>
                     <button 
@@ -820,7 +896,7 @@ function App() {
                     onClick={handleStartScrape}
                     disabled={scrapingActive}
                   >
-                    {scrapingActive ? '🤖 Scraping in Progress...' : '🚀 Start LinkedIn Scraper'}
+                    {scrapingActive ? '🤖 Scraping in Progress...' : '🚀 Start Scraper Bot'}
                   </button>
                   <button 
                     className="btn" 
@@ -866,33 +942,55 @@ function App() {
           </div>
         )}
 
-        {/* LinkedIn Login Helper Tab */}
+        {/* Job Portal Login Helper Tab */}
         {currentTab === 'login' && (
           <div>
             <header className="page-header">
-              <h2 className="page-title">LinkedIn Session Sync</h2>
-              <p className="page-subtitle">Authenticate manually to save cookies and bypass scraper bot verification blockades.</p>
+              <h2 className="page-title">Job Portal Login Helper</h2>
+              <p className="page-subtitle">Sync manual authentication cookies for any portal to bypass scraper bot security blockades.</p>
             </header>
 
-            <div className="glass-panel login-panel">
-              <div className="linkedin-logo">💼</div>
-              <h3 style={{ fontSize: '1.5rem' }}>Bypass Security Walls</h3>
-              <p style={{ color: 'var(--text-secondary)', lineHeight: 1.6, maxWidth: '500px' }}>
-                LinkedIn utilizes anti-bot verifications (Captchas) during automated browser logins.
-                To solve this, click the button below to open a <strong>headed browser session</strong>. 
-                Login manually, complete any Multi-Factor Authentication, and then the system will capture and save your session state to <code>auth.json</code>.
-              </p>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '1.5rem' }}>
+              {[
+                { id: 'linkedin', name: 'LinkedIn', url: 'https://www.linkedin.com', icon: '💼', color: '#0a66c2' },
+                { id: 'naukri', name: 'Naukri', url: 'https://www.naukri.com', icon: '✦', color: '#4a90e2' },
+                { id: 'ziprecruiter', name: 'ZipRecruiter', url: 'https://www.ziprecruiter.com', icon: '⚡', color: '#00cc66' },
+                { id: 'ycombinator', name: 'YCombinator', url: 'https://www.workatastartup.com', icon: '🍊', color: '#ff6600' },
+                { id: 'cutshort', name: 'Cutshort', url: 'https://cutshort.io', icon: '✂️', color: '#b91c1c' }
+              ].map(portal => {
+                const isActive = loginStatus[portal.id];
+                return (
+                  <div key={portal.id} className="glass-panel" style={{ padding: '2rem', display: 'flex', flexDirection: 'column', gap: '1.25rem', alignItems: 'center', textAlign: 'center' }}>
+                    <div style={{ fontSize: '2.5rem', background: portal.color, width: '60px', height: '60px', borderRadius: '15px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', boxShadow: `0 0 15px ${portal.color}44` }}>
+                      {portal.icon}
+                    </div>
+                    <div>
+                      <h3 style={{ fontSize: '1.25rem', marginBottom: '0.25rem' }}>{portal.name}</h3>
+                      <a href={portal.url} target="_blank" rel="noopener noreferrer" style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', textDecoration: 'none' }}>
+                        {portal.url.replace('https://', '')} ↗
+                      </a>
+                    </div>
+                    <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+                      Launch headed browser to log in manually and save session cookies to bypass security checks.
+                    </p>
 
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', background: 'rgba(255,255,255,0.05)', padding: '0.75rem 1.25rem', borderRadius: '10px' }}>
-                <span className={`status-indicator ${loginStatus ? 'online' : 'offline'}`}></span>
-                <span style={{ fontWeight: 600 }}>
-                  Status: {loginStatus ? 'Authenticated session active (auth.json found)' : 'Unauthenticated'}
-                </span>
-              </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', background: 'rgba(255,255,255,0.05)', padding: '0.5rem 1rem', borderRadius: '8px', fontSize: '0.85rem', width: '100%', justifyContent: 'center' }}>
+                      <span className={`status-indicator ${isActive ? 'online' : 'offline'}`}></span>
+                      <span style={{ fontWeight: 600 }}>
+                        {isActive ? 'Session Active' : 'Unauthenticated'}
+                      </span>
+                    </div>
 
-              <button className="btn btn-secondary" style={{ padding: '0.85rem 2rem', fontSize: '1rem' }} onClick={handleLinkedInLogin}>
-                🔐 Launch Headed Browser for Manual Login
-              </button>
+                    <button 
+                      className="btn btn-secondary" 
+                      style={{ width: '100%', justifyContent: 'center', padding: '0.75rem', fontSize: '0.9rem', border: '1px solid rgba(255, 255, 255, 0.1)' }}
+                      onClick={() => handlePortalLogin(portal.id)}
+                    >
+                      🔐 Launch Login
+                    </button>
+                  </div>
+                );
+              })}
             </div>
           </div>
         )}
@@ -988,6 +1086,7 @@ function App() {
                 <h2 style={{ fontSize: '1.5rem', color: 'white' }}>{selectedJob.title}</h2>
                 <div className="job-detail-card-meta">
                   <span style={{ color: '#a78bfa', fontWeight: 600 }}>🏢 {selectedJob.company}</span>
+                  <span style={{ textTransform: 'capitalize', fontWeight: 600, color: '#f3f4f6' }}>🔑 {selectedJob.portal || 'linkedin'}</span>
                   <span>📍 {selectedJob.location}</span>
                   {selectedJob.experience && selectedJob.experience !== 'Not Specified' && (
                     <span>💼 {selectedJob.experience}</span>

@@ -28,6 +28,7 @@ async function getDb() {
       missing_skills TEXT,
       resume_suggestions TEXT,
       cover_letter TEXT,
+      portal TEXT DEFAULT 'linkedin',
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )
   `);
@@ -35,6 +36,13 @@ async function getDb() {
   // Ensure experience column exists
   try {
     await db.exec('ALTER TABLE jobs ADD COLUMN experience TEXT');
+  } catch (err) {
+    // Column already exists, safe to ignore
+  }
+
+  // Ensure portal column exists
+  try {
+    await db.exec("ALTER TABLE jobs ADD COLUMN portal TEXT DEFAULT 'linkedin'");
   } catch (err) {
     // Column already exists, safe to ignore
   }
@@ -75,9 +83,9 @@ async function saveJob(job) {
   const database = await getDb();
   // Insert or ignore to prevent overwriting existing status/scores
   await database.run(
-    `INSERT OR IGNORE INTO jobs (id, title, company, location, link, description, posted_date, status, experience)
-     VALUES (?, ?, ?, ?, ?, ?, ?, 'new', ?)`,
-    [job.id, job.title, job.company, job.location, job.link, job.description, job.posted_date, job.experience || 'Not Specified']
+    `INSERT OR IGNORE INTO jobs (id, title, company, location, link, description, posted_date, status, experience, portal)
+     VALUES (?, ?, ?, ?, ?, ?, ?, 'new', ?, ?)`,
+    [job.id, job.title, job.company, job.location, job.link, job.description, job.posted_date, job.experience || 'Not Specified', job.portal || 'linkedin']
   );
 }
 

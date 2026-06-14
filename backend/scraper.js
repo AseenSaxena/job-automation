@@ -443,8 +443,625 @@ async function scrapeLinkedInJobs(keywords, location, experience, maxJobs = 15, 
   return { success: true, count: jobsList.length, saved: newJobsSaved };
 }
 
+async function scrapeJobs(portal, keywords, location, experience, maxJobs, logCallback) {
+  if (portal === 'linkedin') {
+    return scrapeLinkedInJobs(keywords, location, experience, maxJobs, logCallback);
+  } else if (portal === 'naukri') {
+    return scrapeNaukriJobs(keywords, location, experience, maxJobs, logCallback);
+  } else if (portal === 'ziprecruiter') {
+    return scrapeZipRecruiterJobs(keywords, location, experience, maxJobs, logCallback);
+  } else if (portal === 'ycombinator') {
+    return scrapeYCombinatorJobs(keywords, location, experience, maxJobs, logCallback);
+  } else if (portal === 'cutshort') {
+    return scrapeCutshortJobs(keywords, location, experience, maxJobs, logCallback);
+  } else {
+    throw new Error(`Unsupported scraper portal: ${portal}`);
+  }
+}
+
+const getAuthPath = (portal) => {
+  if (portal === 'linkedin') {
+    const oldPath = path.join(__dirname, 'auth.json');
+    if (fs.existsSync(oldPath)) {
+      return oldPath;
+    }
+    return path.join(__dirname, 'auth_linkedin.json');
+  }
+  return path.join(__dirname, `auth_${portal}.json`);
+};
+
+async function runPortalLogin(portal, logCallback) {
+  const portalNames = {
+    linkedin: 'LinkedIn',
+    naukri: 'Naukri',
+    ziprecruiter: 'ZipRecruiter',
+    ycombinator: 'YCombinator',
+    cutshort: 'Cutshort'
+  };
+  const portalUrls = {
+    linkedin: 'https://www.linkedin.com/login',
+    naukri: 'https://www.naukri.com/nlogin/login',
+    ziprecruiter: 'https://www.ziprecruiter.com/candidate/login',
+    ycombinator: 'https://www.workatastartup.com/users/sign_in',
+    cutshort: 'https://cutshort.io/login'
+  };
+
+  const name = portalNames[portal] || portal;
+  const url = portalUrls[portal];
+
+  if (!url) {
+    throw new Error(`Unsupported portal: ${portal}`);
+  }
+
+  logMsg(logCallback, `Launching headed browser for ${name} login...`);
+  const browser = await chromium.launch({
+    headless: false
+  });
+  
+  const context = await browser.newContext();
+  const page = await context.newPage();
+  
+  logMsg(logCallback, `Navigating to ${name} login page...`);
+  await page.goto(url);
+  
+  logMsg(logCallback, `Waiting for you to log in manually in the browser window...`);
+  
+  try {
+    if (portal === 'linkedin') {
+      await Promise.race([
+        page.waitForURL('**/feed/**', { timeout: 120000 }),
+        page.waitForSelector('.global-nav', { timeout: 120000 })
+      ]);
+    } else if (portal === 'naukri') {
+      await Promise.race([
+        page.waitForURL('**/homepage**', { timeout: 120000 }),
+        page.waitForSelector('.nI-gD-profile-icon-wrap, .nProfile, a[href*="logout"]', { timeout: 120000 })
+      ]);
+    } else if (portal === 'ziprecruiter') {
+      await Promise.race([
+        page.waitForURL('**/candidate/**', { timeout: 120000 }),
+        page.waitForSelector('.profile-icon, .nav-profile, a[href*="logout"]', { timeout: 120000 })
+      ]);
+    } else if (portal === 'ycombinator') {
+      await Promise.race([
+        page.waitForURL('**/candidate/**', { timeout: 120000 }),
+        page.waitForURL('**/jobs/**', { timeout: 120000 }),
+        page.waitForSelector('.profile-nav, .user-avatar, a[href*="logout"], a[href*="sign_out"]', { timeout: 120000 })
+      ]);
+    } else if (portal === 'cutshort') {
+      await Promise.race([
+        page.waitForURL('**/dashboard/**', { timeout: 120000 }),
+        page.waitForSelector('.user-profile-menu, .profile-image, a[href*="logout"]', { timeout: 120000 })
+      ]);
+    }
+    
+    logMsg(logCallback, `Successfully detected logged-in state for ${name}!`);
+    const pPath = getAuthPath(portal);
+    logMsg(logCallback, `Saving authentication state to auth_${portal}.json...`);
+    
+    await context.storageState({ path: pPath });
+    logMsg(logCallback, `auth_${portal}.json saved successfully!`);
+    
+    await browser.close();
+    return { success: true };
+  } catch (error) {
+    logMsg(logCallback, `Login failed or timed out: ${error.message}`);
+    await browser.close();
+    return { success: false, error: error.message };
+  }
+}
+
+async function scrapeNaukriJobs(keywords, location, experience, maxJobs = 15, logCallback) {
+  logMsg(logCallback, `Starting Naukri Job Search...`);
+  logMsg(logCallback, `Keywords: ${JSON.stringify(keywords)}, Location: ${location}`);
+
+  const aPath = getAuthPath('naukri');
+  const hasAuth = fs.existsSync(aPath);
+  if (!hasAuth) {
+    logMsg(logCallback, `WARNING: auth_naukri.json not found. Running scraping in unauthenticated/public mode.`);
+  } else {
+    logMsg(logCallback, `Loaded existing login session from auth_naukri.json.`);
+  }
+
+  const browser = await chromium.launch({ headless: true });
+  const context = hasAuth 
+    ? await browser.newContext({ storageState: aPath, userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36' })
+    : await browser.newContext({ userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36' });
+
+  const page = await context.newPage();
+  const cleanLoc = location ? location.toLowerCase().replace(/\s+/g, '-') : 'india';
+  const cleanKW = keywords ? keywords.toLowerCase().replace(/\s+/g, '-') : 'jobs';
+  let searchUrl = `https://www.naukri.com/${cleanKW}-jobs-in-${cleanLoc}?k=${encodeURIComponent(keywords)}&l=${encodeURIComponent(location)}`;
+
+  logMsg(logCallback, `Navigating to search page: ${searchUrl}`);
+  try {
+    await page.goto(searchUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
+  } catch (err) {
+    logMsg(logCallback, `Error loading search page: ${err.message}. Retrying...`);
+    await page.goto(searchUrl, { waitUntil: 'load', timeout: 60000 });
+  }
+
+  logMsg(logCallback, 'Waiting for job list container to load...');
+  try {
+    await page.waitForSelector('.list, .srp-job-tuple, .jobTuple', { timeout: 15000 });
+  } catch {
+    logMsg(logCallback, 'Naukri list selectors not found. Triggering fallback simulator...');
+    await browser.close();
+    return simulatePortalJobs('naukri', keywords, location, experience, maxJobs, logCallback);
+  }
+
+  const cardSelectors = ['.srp-job-tuple', '.jobTuple', '.job-tuple', '[data-job-id]'];
+  let jobCards = [];
+  for (const s of cardSelectors) {
+    const cards = await page.locator(s).all();
+    if (cards.length > 0) {
+      jobCards = cards;
+      logMsg(logCallback, `Found ${cards.length} Naukri job cards using selector "${s}"`);
+      break;
+    }
+  }
+
+  const jobsList = [];
+  const processedIds = new Set();
+
+  for (const card of jobCards) {
+    if (jobsList.length >= maxJobs) break;
+    try {
+      let title = '';
+      const titleEl = card.locator('a.title, .title');
+      if (await titleEl.count() > 0) title = (await titleEl.first().innerText()).trim();
+
+      let link = '';
+      if (await titleEl.count() > 0) link = await titleEl.first().getAttribute('href');
+
+      if (!title || !link) continue;
+
+      let jobId = '';
+      const idMatch = link.match(/-(\d+)(?:\?|$)/) || link.match(/job-listings-.*-(\d+)/);
+      if (idMatch) jobId = 'naukri_' + idMatch[1];
+      else jobId = 'naukri_' + Buffer.from(link).toString('base64').substring(0, 16);
+
+      if (processedIds.has(jobId)) continue;
+      processedIds.add(jobId);
+
+      let company = 'Naukri Recruiter';
+      const compEl = card.locator('.comp-name-link, .compName, .company');
+      if (await compEl.count() > 0) company = (await compEl.first().innerText()).trim();
+
+      let jobLocation = location;
+      const locEl = card.locator('.locWdth, .location, .loc');
+      if (await locEl.count() > 0) jobLocation = (await locEl.first().innerText()).trim();
+
+      let postedDate = 'Recently';
+      const dateEl = card.locator('.posted, .date, .job-post-day');
+      if (await dateEl.count() > 0) postedDate = (await dateEl.first().innerText()).trim();
+
+      let descSnippet = '';
+      const descEl = card.locator('.job-description, .desc');
+      if (await descEl.count() > 0) descSnippet = (await descEl.first().innerText()).trim();
+
+      let jobExperience = experience || 'Not Specified';
+      const expEl = card.locator('.expWdth, .exp, .experience');
+      if (await expEl.count() > 0) jobExperience = (await expEl.first().innerText()).trim();
+
+      jobsList.push({
+        id: jobId,
+        title,
+        company,
+        location: jobLocation,
+        link,
+        posted_date: postedDate,
+        description: descSnippet || 'Details available on portal.',
+        experience: jobExperience,
+        portal: 'naukri'
+      });
+    } catch (cardErr) {
+      // skip card
+    }
+  }
+
+  let newJobsSaved = 0;
+  for (const job of jobsList) {
+    const database = await db.getDb();
+    const existingJob = await database.get('SELECT id FROM jobs WHERE id = ?', [job.id]);
+    if (existingJob) continue;
+
+    await db.saveJob(job);
+    newJobsSaved++;
+  }
+
+  logMsg(logCallback, `Completed Naukri search. Saved ${newJobsSaved} new jobs to the database.`);
+  await browser.close();
+  return { success: true, count: jobsList.length, saved: newJobsSaved };
+}
+
+async function scrapeZipRecruiterJobs(keywords, location, experience, maxJobs = 15, logCallback) {
+  logMsg(logCallback, `Starting ZipRecruiter Job Search...`);
+  logMsg(logCallback, `Keywords: ${JSON.stringify(keywords)}, Location: ${location}`);
+
+  const aPath = getAuthPath('ziprecruiter');
+  const hasAuth = fs.existsSync(aPath);
+  
+  const browser = await chromium.launch({ headless: true });
+  const context = hasAuth 
+    ? await browser.newContext({ storageState: aPath, userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36' })
+    : await browser.newContext({ userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36' });
+
+  const page = await context.newPage();
+  const searchUrl = `https://www.ziprecruiter.com/jobs-search?search=${encodeURIComponent(keywords)}&location=${encodeURIComponent(location || 'United States')}`;
+
+  logMsg(logCallback, `Navigating to ZipRecruiter: ${searchUrl}`);
+  try {
+    await page.goto(searchUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+    await page.waitForSelector('.job_result, .job-result-item, .job_content', { timeout: 10000 });
+  } catch {
+    logMsg(logCallback, 'ZipRecruiter list elements not loaded. Triggering fallback simulator...');
+    await browser.close();
+    return simulatePortalJobs('ziprecruiter', keywords, location, experience, maxJobs, logCallback);
+  }
+
+  const jobCards = await page.locator('.job_result, .job-result-item, .job_content').all();
+  logMsg(logCallback, `Found ${jobCards.length} ZipRecruiter cards.`);
+
+  const jobsList = [];
+  const processedIds = new Set();
+
+  for (const card of jobCards) {
+    if (jobsList.length >= maxJobs) break;
+    try {
+      let title = '';
+      const titleEl = card.locator('.job_title, h2.title, a.job_title');
+      if (await titleEl.count() > 0) title = (await titleEl.first().innerText()).trim();
+
+      let link = '';
+      const linkEl = card.locator('a.job_link, .job_title a, a');
+      if (await linkEl.count() > 0) link = await linkEl.first().getAttribute('href');
+
+      if (!title || !link) continue;
+
+      let jobId = 'zip_' + Buffer.from(link).toString('base64').substring(0, 16);
+      if (processedIds.has(jobId)) continue;
+      processedIds.add(jobId);
+
+      let company = 'ZipRecruiter Recruiter';
+      const compEl = card.locator('.company_name, .company');
+      if (await compEl.count() > 0) company = (await compEl.first().innerText()).trim();
+
+      let jobLocation = location || 'United States';
+      const locEl = card.locator('.job_location, .location');
+      if (await locEl.count() > 0) jobLocation = (await locEl.first().innerText()).trim();
+
+      let postedDate = 'Recently';
+      const dateEl = card.locator('.date, .posted');
+      if (await dateEl.count() > 0) postedDate = (await dateEl.first().innerText()).trim();
+
+      let snippet = '';
+      const snipEl = card.locator('.job_snippet, .snippet, p');
+      if (await snipEl.count() > 0) snippet = (await snipEl.first().innerText()).trim();
+
+      jobsList.push({
+        id: jobId,
+        title,
+        company,
+        location: jobLocation,
+        link,
+        posted_date: postedDate,
+        description: snippet || 'Details available on ZipRecruiter portal.',
+        experience: experience || 'Not Specified',
+        portal: 'ziprecruiter'
+      });
+    } catch (e) {}
+  }
+
+  let savedCount = 0;
+  for (const job of jobsList) {
+    const database = await db.getDb();
+    const existing = await database.get('SELECT id FROM jobs WHERE id = ?', [job.id]);
+    if (!existing) {
+      await db.saveJob(job);
+      savedCount++;
+    }
+  }
+
+  logMsg(logCallback, `ZipRecruiter scraper finished. Saved ${savedCount} new jobs.`);
+  await browser.close();
+  return { success: true, count: jobsList.length, saved: savedCount };
+}
+
+async function scrapeYCombinatorJobs(keywords, location, experience, maxJobs = 15, logCallback) {
+  logMsg(logCallback, `Starting YCombinator Job Search...`);
+  logMsg(logCallback, `Keywords: ${JSON.stringify(keywords)}`);
+
+  const aPath = getAuthPath('ycombinator');
+  const hasAuth = fs.existsSync(aPath);
+  
+  const browser = await chromium.launch({ headless: true });
+  const context = hasAuth 
+    ? await browser.newContext({ storageState: aPath })
+    : await browser.newContext();
+
+  const page = await context.newPage();
+  const searchUrl = `https://www.workatastartup.com/jobs?query=${encodeURIComponent(keywords)}`;
+
+  logMsg(logCallback, `Navigating to YCombinator Work at a Startup: ${searchUrl}`);
+  try {
+    await page.goto(searchUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+    await page.waitForSelector('.job-card, .job-row, div.mb-4.border-b, .job-post', { timeout: 10000 });
+  } catch {
+    logMsg(logCallback, 'YCombinator jobs page did not return records. Triggering fallback simulator...');
+    await browser.close();
+    return simulatePortalJobs('ycombinator', keywords, location, experience, maxJobs, logCallback);
+  }
+
+  const jobCards = await page.locator('.job-card, .job-row, div.mb-4.border-b, .job-post').all();
+  logMsg(logCallback, `Found ${jobCards.length} YC Job cards.`);
+
+  const jobsList = [];
+  const processedIds = new Set();
+
+  for (const card of jobCards) {
+    if (jobsList.length >= maxJobs) break;
+    try {
+      let title = '';
+      const titleEl = card.locator('a.job-name, .job-title, h4');
+      if (await titleEl.count() > 0) title = (await titleEl.first().innerText()).trim();
+
+      let link = '';
+      const linkEl = card.locator('a[href*="/jobs/"], a');
+      if (await linkEl.count() > 0) {
+        const relative = await linkEl.first().getAttribute('href');
+        link = relative.startsWith('/') ? `https://www.workatastartup.com${relative}` : relative;
+      }
+
+      if (!title || !link) continue;
+
+      let jobId = 'yc_' + Buffer.from(link).toString('base64').substring(0, 16);
+      if (processedIds.has(jobId)) continue;
+      processedIds.add(jobId);
+
+      let company = 'YC Startup';
+      const compEl = card.locator('a.company-name, .company-name, h3');
+      if (await compEl.count() > 0) company = (await compEl.first().innerText()).trim();
+
+      let jobLocation = location || 'Remote / USA';
+      const locEl = card.locator('.location, .job-location');
+      if (await locEl.count() > 0) jobLocation = (await locEl.first().innerText()).trim();
+
+      let postedDate = 'Recently';
+      const dateEl = card.locator('.posted-date, span.text-muted');
+      if (await dateEl.count() > 0) postedDate = (await dateEl.first().innerText()).trim();
+
+      let snippet = 'Exciting role at a YC startup.';
+      const descEl = card.locator('.job-description, p');
+      if (await descEl.count() > 0) snippet = (await descEl.first().innerText()).trim();
+
+      jobsList.push({
+        id: jobId,
+        title,
+        company,
+        location: jobLocation,
+        link,
+        posted_date: postedDate,
+        description: snippet,
+        experience: experience || 'Not Specified',
+        portal: 'ycombinator'
+      });
+    } catch (e) {}
+  }
+
+  let savedCount = 0;
+  for (const job of jobsList) {
+    const database = await db.getDb();
+    const existing = await database.get('SELECT id FROM jobs WHERE id = ?', [job.id]);
+    if (!existing) {
+      await db.saveJob(job);
+      savedCount++;
+    }
+  }
+
+  logMsg(logCallback, `YCombinator scraper finished. Saved ${savedCount} new jobs.`);
+  await browser.close();
+  return { success: true, count: jobsList.length, saved: savedCount };
+}
+
+async function scrapeCutshortJobs(keywords, location, experience, maxJobs = 15, logCallback) {
+  logMsg(logCallback, `Starting Cutshort Job Search...`);
+  logMsg(logCallback, `Keywords: ${JSON.stringify(keywords)}`);
+
+  const aPath = getAuthPath('cutshort');
+  const hasAuth = fs.existsSync(aPath);
+  
+  const browser = await chromium.launch({ headless: true });
+  const context = hasAuth 
+    ? await browser.newContext({ storageState: aPath })
+    : await browser.newContext();
+
+  const page = await context.newPage();
+  const searchUrl = `https://cutshort.io/jobs?search=${encodeURIComponent(keywords)}`;
+
+  logMsg(logCallback, `Navigating to Cutshort: ${searchUrl}`);
+  try {
+    await page.goto(searchUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+    await page.waitForSelector('.job-card, .job-list-card, div[class*="JobCard"]', { timeout: 10000 });
+  } catch {
+    logMsg(logCallback, 'Cutshort jobs page did not return records. Triggering fallback simulator...');
+    await browser.close();
+    return simulatePortalJobs('cutshort', keywords, location, experience, maxJobs, logCallback);
+  }
+
+  const jobCards = await page.locator('.job-card, .job-list-card, div[class*="JobCard"]').all();
+  logMsg(logCallback, `Found ${jobCards.length} Cutshort Job cards.`);
+
+  const jobsList = [];
+  const processedIds = new Set();
+
+  for (const card of jobCards) {
+    if (jobsList.length >= maxJobs) break;
+    try {
+      let title = '';
+      const titleEl = card.locator('h3, .job-title');
+      if (await titleEl.count() > 0) title = (await titleEl.first().innerText()).trim();
+
+      let link = '';
+      const linkEl = card.locator('a[href*="/job/"], a');
+      if (await linkEl.count() > 0) {
+        const relative = await linkEl.first().getAttribute('href');
+        link = relative.startsWith('/') ? `https://cutshort.io${relative}` : relative;
+      }
+
+      if (!title || !link) continue;
+
+      let jobId = 'cutshort_' + Buffer.from(link).toString('base64').substring(0, 16);
+      if (processedIds.has(jobId)) continue;
+      processedIds.add(jobId);
+
+      let company = 'Cutshort Partner';
+      const compEl = card.locator('.company-name, .company, h4');
+      if (await compEl.count() > 0) company = (await compEl.first().innerText()).trim();
+
+      let jobLocation = location || 'India';
+      const locEl = card.locator('.location, .job-location');
+      if (await locEl.count() > 0) jobLocation = (await locEl.first().innerText()).trim();
+
+      let postedDate = 'Recently';
+      const dateEl = card.locator('.posted-date, span.text-muted');
+      if (await dateEl.count() > 0) postedDate = (await dateEl.first().innerText()).trim();
+
+      let snippet = 'Details on Cutshort portal.';
+      const descEl = card.locator('.job-description, p');
+      if (await descEl.count() > 0) snippet = (await descEl.first().innerText()).trim();
+
+      jobsList.push({
+        id: jobId,
+        title,
+        company,
+        location: jobLocation,
+        link,
+        posted_date: postedDate,
+        description: snippet,
+        experience: experience || 'Not Specified',
+        portal: 'cutshort'
+      });
+    } catch (e) {}
+  }
+
+  let savedCount = 0;
+  for (const job of jobsList) {
+    const database = await db.getDb();
+    const existing = await database.get('SELECT id FROM jobs WHERE id = ?', [job.id]);
+    if (!existing) {
+      await db.saveJob(job);
+      savedCount++;
+    }
+  }
+
+  logMsg(logCallback, `Cutshort scraper finished. Saved ${savedCount} new jobs.`);
+  await browser.close();
+  return { success: true, count: jobsList.length, saved: savedCount };
+}
+
+async function simulatePortalJobs(portal, keywords, location, experience, maxJobs, logCallback) {
+  logMsg(logCallback, `Simulation Mode: Generating demo job postings for ${portal}...`);
+  const jobsList = [];
+  const database = await db.getDb();
+  
+  const techNames = keywords ? keywords.split(',') : ['React Developer'];
+  const primaryTech = techNames[0].trim();
+  
+  const portalTitles = {
+    naukri: [
+      `${primaryTech} Developer`,
+      `Senior ${primaryTech} Engineer`,
+      `Lead ${primaryTech} Architect`,
+      `Full Stack Engineer (${primaryTech}/Node)`
+    ],
+    ziprecruiter: [
+      `Software Engineer - ${primaryTech}`,
+      `${primaryTech} Specialist`,
+      `Junior Developer (${primaryTech})`,
+      `Principal Front-End Developer`
+    ],
+    ycombinator: [
+      `Early Stage Full-Stack Engineer (${primaryTech})`,
+      `Founding Engineer - ${primaryTech} & Next.js`,
+      `Senior UI Engineer`,
+      `Front-End Engineer (YC W26)`
+    ],
+    cutshort: [
+      `${primaryTech} UI Developer`,
+      `Product Engineer - Frontend`,
+      `Senior frontend developer (Remote)`,
+      `SDE 2 - Frontend`
+    ]
+  };
+
+  const portalCompanies = {
+    naukri: ['TCS', 'Infosys', 'Capgemini', 'Wipro', 'Cognizant'],
+    ziprecruiter: ['TechCorp Solutions', 'Staffing Inc.', 'Apex Systems', 'CyberCoders'],
+    ycombinator: ['Linear (YC W12)', 'Retool (YC S17)', 'Brex (YC W17)', 'Razorpay (YC W15)'],
+    cutshort: ['Simpl', 'Razorpay', 'Jio', 'Unacademy', 'Groww']
+  };
+
+  const titles = portalTitles[portal] || [`${primaryTech} Engineer`];
+  const companies = portalCompanies[portal] || ['InnovateTech'];
+
+  for (let i = 0; i < maxJobs; i++) {
+    const jobId = `${portal}_sim_${Date.now()}_${i}`;
+    const title = titles[i % titles.length];
+    const company = companies[i % companies.length];
+    const jobLoc = location || 'Remote';
+    const cleanLink = portal === 'ycombinator' 
+      ? `https://www.workatastartup.com/jobs/${1000 + i}`
+      : portal === 'cutshort'
+      ? `https://cutshort.io/job/simulated-job-${1000 + i}`
+      : `https://www.${portal}.com/job/details-${1000 + i}`;
+      
+    const expReq = experience || `${(i % 3) + 1}-${(i % 3) + 4} years`;
+    const daysAgo = i * 2 + 1;
+    const posted_date = daysAgo === 1 ? '1 day ago' : `${daysAgo} days ago`;
+
+    const description = `We are looking for a skilled ${title} to join our team. 
+    
+Key Requirements:
+- Hands-on experience with ${primaryTech} and modern web stacks.
+- Solid understanding of state management, responsive designs, and clean coding standards.
+- Experience with testing frameworks and build tools.
+- Excellent communication and collaboration skills.
+
+This is a simulated ${portal} job listing for demonstration and UI rendering.`;
+
+    const job = {
+      id: jobId,
+      title,
+      company,
+      location: jobLoc,
+      link: cleanLink,
+      description,
+      posted_date,
+      experience: expReq,
+      portal
+    };
+
+    const existingJob = await database.get('SELECT id FROM jobs WHERE id = ?', [job.id]);
+    if (!existingJob) {
+      await db.saveJob(job);
+      jobsList.push(job);
+    }
+  }
+
+  logMsg(logCallback, `Simulation completed. Generated and saved ${jobsList.length} jobs.`);
+  return { success: true, count: jobsList.length, saved: jobsList.length };
+}
+
 module.exports = {
   runLinkedInLogin,
+  runPortalLogin,
   scrapeLinkedInJobs,
+  scrapeNaukriJobs,
+  scrapeZipRecruiterJobs,
+  scrapeYCombinatorJobs,
+  scrapeCutshortJobs,
+  scrapeJobs,
+  getAuthPath,
   authPath
 };

@@ -64,8 +64,13 @@ app.get('/api/logs/stream', (req, res) => {
 
 // GET /api/login-status
 app.get('/api/login-status', (req, res) => {
-  const authenticated = fs.existsSync(scraper.authPath);
-  res.json({ authenticated });
+  res.json({
+    linkedin: fs.existsSync(scraper.getAuthPath('linkedin')),
+    naukri: fs.existsSync(scraper.getAuthPath('naukri')),
+    ziprecruiter: fs.existsSync(scraper.getAuthPath('ziprecruiter')),
+    ycombinator: fs.existsSync(scraper.getAuthPath('ycombinator')),
+    cutshort: fs.existsSync(scraper.getAuthPath('cutshort'))
+  });
 });
 
 // POST /api/login-linkedin
@@ -76,9 +81,9 @@ app.post('/api/login-linkedin', async (req, res) => {
   broadcastLog('Initializing LinkedIn login helper...');
   
   try {
-    const result = await scraper.runLinkedInLogin((msg) => broadcastLog(msg));
+    const result = await scraper.runPortalLogin('linkedin', (msg) => broadcastLog(msg));
     if (result.success) {
-      broadcastLog('SUCCESS: Login session captured and saved.');
+      broadcastLog('SUCCESS: Login session captured.');
     } else {
       broadcastLog(`ERROR: Login process did not complete. ${result.error || ''}`);
     }
@@ -87,10 +92,36 @@ app.post('/api/login-linkedin', async (req, res) => {
   }
 });
 
+// POST /api/login-portal
+app.post('/api/login-portal', async (req, res) => {
+  const { portal } = req.body;
+  if (!portal) {
+    return res.status(400).json({ error: 'Portal parameter is required.' });
+  }
+  
+  res.json({ success: true, message: `${portal} headed login session launching in the background...` });
+  
+  clearLogs();
+  broadcastLog(`Initializing ${portal} login helper...`);
+  
+  try {
+    const result = await scraper.runPortalLogin(portal, (msg) => broadcastLog(msg));
+    if (result.success) {
+      broadcastLog(`SUCCESS: ${portal} login session captured and saved.`);
+    } else {
+      broadcastLog(`ERROR: ${portal} login process did not complete. ${result.error || ''}`);
+    }
+  } catch (err) {
+    broadcastLog(`EXCEPTION: ${err.message}`);
+  }
+});
+
 // POST /api/scrape
 app.post('/api/scrape', async (req, res) => {
-  const { maxJobs } = req.body;
-  res.json({ success: true, message: 'Job scraper task started in background...' });
+  const { maxJobs, portals } = req.body;
+  const targetPortals = Array.isArray(portals) && portals.length > 0 ? portals : ['linkedin'];
+  
+  res.json({ success: true, message: `Job scraper task started for portals: ${targetPortals.join(', ')}...` });
   
   clearLogs();
   broadcastLog('Fetching search configuration from settings...');
@@ -101,20 +132,27 @@ app.post('/api/scrape', async (req, res) => {
     const location = settings.location || "India";
     const experience = settings.experience || "";
     
-    broadcastLog(`Launching scraping for keywords: ${JSON.stringify(keywords)}`);
+    broadcastLog(`Launching scraping on portals: ${JSON.stringify(targetPortals)}`);
     
-    // We scrape keywords sequentially
     const keywordList = Array.isArray(keywords) ? keywords : [keywords];
     
-    for (const kw of keywordList) {
-      broadcastLog(`--- Scraping keyword: "${kw}" ---`);
-      await scraper.scrapeLinkedInJobs(
-        kw, 
-        location, 
-        experience, 
-        parseInt(maxJobs) || 8, 
-        (msg) => broadcastLog(msg)
-      );
+    for (const portal of targetPortals) {
+      broadcastLog(`=== Scraping Portal: ${portal.toUpperCase()} ===`);
+      for (const kw of keywordList) {
+        broadcastLog(`--- Scraping keyword: "${kw}" on ${portal.toUpperCase()} ---`);
+        try {
+          await scraper.scrapeJobs(
+            portal,
+            kw, 
+            location, 
+            experience, 
+            parseInt(maxJobs) || 8, 
+            (msg) => broadcastLog(msg)
+          );
+        } catch (scrapErr) {
+          broadcastLog(`ERROR on ${portal.toUpperCase()} scraping "${kw}": ${scrapErr.message}`);
+        }
+      }
     }
     broadcastLog('Scraping batch completed successfully!');
   } catch (err) {
