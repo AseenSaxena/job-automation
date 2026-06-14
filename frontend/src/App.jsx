@@ -952,17 +952,29 @@ function App() {
 
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '1.5rem' }}>
               {[
-                { id: 'linkedin', name: 'LinkedIn', url: 'https://www.linkedin.com', icon: '💼', color: '#0a66c2' },
-                { id: 'naukri', name: 'Naukri', url: 'https://www.naukri.com', icon: '✦', color: '#4a90e2' },
-                { id: 'ziprecruiter', name: 'ZipRecruiter', url: 'https://www.ziprecruiter.com', icon: '⚡', color: '#00cc66' },
-                { id: 'ycombinator', name: 'YCombinator', url: 'https://www.workatastartup.com', icon: '🍊', color: '#ff6600' },
-                { id: 'cutshort', name: 'Cutshort', url: 'https://cutshort.io', icon: '✂️', color: '#b91c1c' }
+                { id: 'linkedin', name: 'LinkedIn', url: 'https://www.linkedin.com', logo: '/linkedin-logo.png', color: '#0a66c2' },
+                { id: 'naukri', name: 'Naukri', url: 'https://www.naukri.com', logo: '/naukari-logo.png', color: '#4a90e2' },
+                { id: 'ziprecruiter', name: 'ZipRecruiter', url: 'https://www.ziprecruiter.com', logo: '/ziprecruiter-logo.png', color: '#00cc66' },
+                { id: 'ycombinator', name: 'YCombinator', url: 'https://www.ycombinator.com', logo: '/ycombinator-logo.png', color: '#ff6600' },
+                { id: 'cutshort', name: 'Cutshort', url: 'https://cutshort.io', logo: '/cutshort-logo.png', color: '#b91c1c' }
               ].map(portal => {
                 const isActive = loginStatus[portal.id];
                 return (
                   <div key={portal.id} className="glass-panel" style={{ padding: '2rem', display: 'flex', flexDirection: 'column', gap: '1.25rem', alignItems: 'center', textAlign: 'center' }}>
-                    <div style={{ fontSize: '2.5rem', background: portal.color, width: '60px', height: '60px', borderRadius: '15px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', boxShadow: `0 0 15px ${portal.color}44` }}>
-                      {portal.icon}
+                    <div style={{
+                      width: '72px', height: '72px', borderRadius: '18px',
+                      background: 'rgba(255,255,255,0.06)',
+                      border: `1px solid ${portal.color}44`,
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      boxShadow: `0 0 20px ${portal.color}33`,
+                      overflow: 'hidden',
+                      padding: '10px'
+                    }}>
+                      <img
+                        src={portal.logo}
+                        alt={`${portal.name} logo`}
+                        style={{ width: '100%', height: '100%', objectFit: 'contain' }}
+                      />
                     </div>
                     <div>
                       <h3 style={{ fontSize: '1.25rem', marginBottom: '0.25rem' }}>{portal.name}</h3>

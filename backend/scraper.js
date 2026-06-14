@@ -482,7 +482,7 @@ async function runPortalLogin(portal, logCallback) {
     linkedin: 'https://www.linkedin.com/login',
     naukri: 'https://www.naukri.com/nlogin/login',
     ziprecruiter: 'https://www.ziprecruiter.com/candidate/login',
-    ycombinator: 'https://www.workatastartup.com/users/sign_in',
+    ycombinator: 'https://www.ycombinator.com/',
     cutshort: 'https://cutshort.io/login'
   };
 
