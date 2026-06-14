@@ -1,5 +1,51 @@
 import React, { useState, useEffect, useRef } from 'react';
 
+const parsePostedDate = (dateStr) => {
+  if (!dateStr) return new Date(0);
+  
+  const now = new Date();
+  const cleanStr = dateStr.trim().toLowerCase();
+  
+  // Try matching DD/MM/YYYY
+  const dateParts = cleanStr.match(/^(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{4})$/);
+  if (dateParts) {
+    return new Date(parseInt(dateParts[3]), parseInt(dateParts[2]) - 1, parseInt(dateParts[1]));
+  }
+  
+  // Try matching "X units ago"
+  const numberMatch = cleanStr.match(/^(\d+)\s+(minute|hour|day|week|month|year)s?\s+ago/);
+  if (numberMatch) {
+    const val = parseInt(numberMatch[1], 10);
+    const unit = numberMatch[2];
+    const d = new Date(now);
+    
+    if (unit === 'minute') d.setMinutes(now.getMinutes() - val);
+    else if (unit === 'hour') d.setHours(now.getHours() - val);
+    else if (unit === 'day') d.setDate(now.getDate() - val);
+    else if (unit === 'week') d.setDate(now.getDate() - val * 7);
+    else if (unit === 'month') d.setMonth(now.getMonth() - val);
+    else if (unit === 'year') d.setFullYear(now.getFullYear() - val);
+    
+    return d;
+  }
+  
+  if (cleanStr.includes('today') || cleanStr.includes('just now') || cleanStr.includes('active now')) {
+    return now;
+  }
+  if (cleanStr.includes('yesterday')) {
+    const d = new Date(now);
+    d.setDate(now.getDate() - 1);
+    return d;
+  }
+  
+  const parsed = Date.parse(dateStr);
+  if (!isNaN(parsed)) {
+    return new Date(parsed);
+  }
+  
+  return new Date(0);
+};
+
 function App() {
   const [currentTab, setCurrentTab] = useState('dashboard');
   const [jobs, setJobs] = useState([]);
@@ -21,6 +67,14 @@ function App() {
   const [saveStatus, setSaveStatus] = useState('');
   const [uploadingResume, setUploadingResume] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [selectedJobIds, setSelectedJobIds] = useState([]);
+  const [scoreFilter, setScoreFilter] = useState('all');
+  const [dateFilter, setDateFilter] = useState('all');
+  const [sortBy, setSortBy] = useState('newest');
+
+  useEffect(() => {
+    setSelectedJobIds([]);
+  }, [statusFilter, scoreFilter, dateFilter, sortBy]);
 
   const handleTabClick = (tab) => {
     setCurrentTab(tab);
@@ -188,6 +242,47 @@ function App() {
     }
   };
 
+  const handleDeleteSelected = async () => {
+    if (selectedJobIds.length === 0) return;
+ 
+    try {
+      const res = await fetch(`${API_URL}/jobs`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids: selectedJobIds })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setSelectedJobIds([]);
+        fetchJobs();
+      } else {
+        alert(`Failed to delete jobs: ${data.error}`);
+      }
+    } catch (err) {
+      console.error(err);
+      alert('Network error deleting jobs.');
+    }
+  };
+
+  const handleDeleteSingle = async (jobId) => {
+    try {
+      const res = await fetch(`${API_URL}/jobs`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids: [jobId] })
+      });
+      const data = await res.json();
+      if (data.success) {
+        fetchJobs();
+      } else {
+        alert(`Failed to delete job: ${data.error}`);
+      }
+    } catch (err) {
+      console.error(err);
+      alert('Network error deleting job.');
+    }
+  };
+
   const handleAnalyzeJob = async (jobId) => {
     setAnalyzingJobId(jobId);
     try {
@@ -282,11 +377,53 @@ function App() {
     return 'low';
   };
 
-  // Filter jobs based on selected filter tab
-  const filteredJobs = jobs.filter(job => {
-    if (statusFilter === 'all') return true;
-    return job.status === statusFilter;
-  });
+  // Filter and sort jobs based on tab, score threshold, date range, and sort preferences
+  const processedJobs = jobs
+    .filter(job => {
+      // 1. Status Filter Tab
+      if (statusFilter !== 'all' && job.status !== statusFilter) return false;
+
+      // 2. Match Score Filter
+      if (scoreFilter === 'high') {
+        if (job.match_score === null || job.match_score < 80) return false;
+      } else if (scoreFilter === 'medium') {
+        if (job.match_score === null || job.match_score < 60 || job.match_score >= 80) return false;
+      } else if (scoreFilter === 'low') {
+        if (job.match_score === null || job.match_score >= 60) return false;
+      } else if (scoreFilter === 'none') {
+        if (job.match_score !== null) return false;
+      }
+
+      // 3. Date Posted Filter
+      if (dateFilter !== 'all') {
+        const postedDate = parsePostedDate(job.posted_date);
+        const now = new Date();
+        const diffTime = Math.abs(now - postedDate);
+        const diffHours = diffTime / (1000 * 60 * 60);
+
+        if (dateFilter === '24h' && diffHours > 24) return false;
+        if (dateFilter === 'week' && diffHours > 24 * 7) return false;
+        if (dateFilter === 'month' && diffHours > 24 * 30) return false;
+      }
+
+      return true;
+    })
+    .sort((a, b) => {
+      if (sortBy === 'newest') {
+        return parsePostedDate(b.posted_date) - parsePostedDate(a.posted_date);
+      } else if (sortBy === 'oldest') {
+        return parsePostedDate(a.posted_date) - parsePostedDate(b.posted_date);
+      } else if (sortBy === 'highest_match') {
+        const scoreA = a.match_score !== null ? a.match_score : -1;
+        const scoreB = b.match_score !== null ? b.match_score : -1;
+        return scoreB - scoreA;
+      } else if (sortBy === 'lowest_match') {
+        const scoreA = a.match_score !== null ? a.match_score : 999;
+        const scoreB = b.match_score !== null ? b.match_score : 999;
+        return scoreA - scoreB;
+      }
+      return 0;
+    });
 
   // Calculate statistics
   const stats = {
@@ -410,19 +547,117 @@ function App() {
               </button>
             </div>
 
+            {/* Sorting and Filtering controls */}
+            <div className="filter-sort-bar">
+              <div className="filter-group">
+                <div className="control-item">
+                  <label htmlFor="score-filter-select">Score Match</label>
+                  <select 
+                    id="score-filter-select"
+                    value={scoreFilter} 
+                    onChange={(e) => setScoreFilter(e.target.value)}
+                  >
+                    <option value="all">All Match Scores</option>
+                    <option value="high">High Match (≥ 80%)</option>
+                    <option value="medium">Medium Match (60% - 79%)</option>
+                    <option value="low">Low Match (&lt; 60%)</option>
+                    <option value="none">Unanalyzed (No Score)</option>
+                  </select>
+                </div>
+                
+                <div className="control-item">
+                  <label htmlFor="date-filter-select">Date Posted</label>
+                  <select 
+                    id="date-filter-select"
+                    value={dateFilter} 
+                    onChange={(e) => setDateFilter(e.target.value)}
+                  >
+                    <option value="all">All Dates</option>
+                    <option value="24h">Past 24 Hours</option>
+                    <option value="week">Past Week</option>
+                    <option value="month">Past Month</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="sort-group">
+                <div className="control-item">
+                  <label htmlFor="sort-select">Sort By</label>
+                  <select 
+                    id="sort-select"
+                    value={sortBy} 
+                    onChange={(e) => setSortBy(e.target.value)}
+                  >
+                    <option value="newest">Newest Posted</option>
+                    <option value="oldest">Oldest Posted</option>
+                    <option value="highest_match">Highest Match Score</option>
+                    <option value="lowest_match">Lowest Match Score</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            {/* Bulk Actions Bar */}
+            {processedJobs.length > 0 && (
+              <div className="bulk-actions-bar">
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                  <input 
+                    type="checkbox" 
+                    id="select-all-checkbox"
+                    checked={processedJobs.length > 0 && selectedJobIds.length === processedJobs.length}
+                    onChange={(e) => {
+                      if (e.target.checked) {
+                        setSelectedJobIds(processedJobs.map(j => j.id));
+                      } else {
+                        setSelectedJobIds([]);
+                      }
+                    }}
+                    style={{ cursor: 'pointer', width: '18px', height: '18px' }}
+                  />
+                  <label htmlFor="select-all-checkbox" style={{ cursor: 'pointer', fontSize: '0.9rem', color: 'var(--text-secondary)' }}>
+                    Select All ({processedJobs.length} jobs)
+                  </label>
+                </div>
+
+                {selectedJobIds.length > 0 && (
+                  <button 
+                    className="btn btn-danger" 
+                    onClick={handleDeleteSelected}
+                    style={{ padding: '0.5rem 1rem', fontSize: '0.875rem' }}
+                  >
+                    🗑️ Delete Selected ({selectedJobIds.length})
+                  </button>
+                )}
+              </div>
+            )}
+
             {/* Jobs List Grid */}
             <div className="jobs-list-container">
-              {filteredJobs.length === 0 ? (
+              {processedJobs.length === 0 ? (
                 <div className="glass-panel" style={{ padding: '3rem', textAlign: 'center', color: 'var(--text-secondary)' }}>
                   No jobs found matching the selection filter. Try running a LinkedIn search.
                 </div>
               ) : (
-                filteredJobs.map(job => (
+                processedJobs.map(job => (
                   <div 
                     key={job.id} 
                     className="glass-panel job-card"
                     onClick={() => setSelectedJob(job)}
                   >
+                    <div onClick={(e) => e.stopPropagation()} className="job-card-checkbox-wrapper">
+                      <input 
+                        type="checkbox"
+                        checked={selectedJobIds.includes(job.id)}
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            setSelectedJobIds(prev => [...prev, job.id]);
+                          } else {
+                            setSelectedJobIds(prev => prev.filter(id => id !== job.id));
+                          }
+                        }}
+                        style={{ cursor: 'pointer', width: '18px', height: '18px' }}
+                      />
+                    </div>
                     <div className="job-primary-info">
                       <div className="job-title-row">
                         <h3 className="job-title">{job.title}</h3>
@@ -430,23 +665,26 @@ function App() {
                       </div>
                       <div className="job-meta-row">
                         <span>📍 {job.location}</span>
-                        <span>📅 Scraped: {job.posted_date}</span>
+                        {job.experience && job.experience !== 'Not Specified' && (
+                          <span>💼 {job.experience}</span>
+                        )}
+                        <span>📅 {job.posted_date}</span>
                       </div>
                     </div>
 
-                    <div>
+                    <div className="job-card-badge-wrapper">
                       <span className={`badge badge-status-${job.status}`}>
                         {job.status}
                       </span>
                     </div>
 
-                    <div>
+                    <div className="job-card-score-wrapper">
                       <div className={`score-pill ${getScoreClass(job.match_score)}`}>
                         {job.match_score !== null ? `${job.match_score}%` : '—'}
                       </div>
                     </div>
 
-                    <div onClick={(e) => e.stopPropagation()}>
+                    <div onClick={(e) => e.stopPropagation()} className="job-card-actions-wrapper">
                       {job.match_score === null ? (
                         <button 
                           className="btn btn-secondary" 
@@ -463,6 +701,13 @@ function App() {
                           Details
                         </button>
                       )}
+                      <button 
+                        className="btn btn-danger" 
+                        onClick={() => handleDeleteSingle(job.id)}
+                        title="Delete Job"
+                      >
+                        Delete
+                      </button>
                     </div>
                   </div>
                 ))
@@ -744,6 +989,9 @@ function App() {
                 <div className="job-detail-card-meta">
                   <span style={{ color: '#a78bfa', fontWeight: 600 }}>🏢 {selectedJob.company}</span>
                   <span>📍 {selectedJob.location}</span>
+                  {selectedJob.experience && selectedJob.experience !== 'Not Specified' && (
+                    <span>💼 {selectedJob.experience}</span>
+                  )}
                   <span>📅 {selectedJob.posted_date}</span>
                 </div>
               </div>
@@ -754,7 +1002,7 @@ function App() {
 
             <div className="modal-body-layout">
               {/* Application Tracking Actions */}
-              <div style={{ display: 'flex', gap: '0.75rem', borderBottom: '1px solid var(--panel-border)', paddingBottom: '1.25rem' }}>
+              <div className="modal-action-buttons">
                 <button 
                   className={`btn ${selectedJob.status === 'interested' ? 'btn-primary' : ''}`}
                   onClick={() => handleUpdateStatus(selectedJob.id, 'interested')}

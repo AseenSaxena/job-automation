@@ -32,6 +32,13 @@ async function getDb() {
     )
   `);
 
+  // Ensure experience column exists
+  try {
+    await db.exec('ALTER TABLE jobs ADD COLUMN experience TEXT');
+  } catch (err) {
+    // Column already exists, safe to ignore
+  }
+
   // Create settings table
   await db.exec(`
     CREATE TABLE IF NOT EXISTS settings (
@@ -68,9 +75,9 @@ async function saveJob(job) {
   const database = await getDb();
   // Insert or ignore to prevent overwriting existing status/scores
   await database.run(
-    `INSERT OR IGNORE INTO jobs (id, title, company, location, link, description, posted_date, status)
-     VALUES (?, ?, ?, ?, ?, ?, ?, 'new')`,
-    [job.id, job.title, job.company, job.location, job.link, job.description, job.posted_date]
+    `INSERT OR IGNORE INTO jobs (id, title, company, location, link, description, posted_date, status, experience)
+     VALUES (?, ?, ?, ?, ?, ?, ?, 'new', ?)`,
+    [job.id, job.title, job.company, job.location, job.link, job.description, job.posted_date, job.experience || 'Not Specified']
   );
 }
 
@@ -123,6 +130,12 @@ async function saveSettings(settings) {
   }
 }
 
+async function deleteJobs(ids) {
+  const database = await getDb();
+  const placeholders = ids.map(() => '?').join(',');
+  await database.run(`DELETE FROM jobs WHERE id IN (${placeholders})`, ids);
+}
+
 module.exports = {
   getDb,
   getJobs,
@@ -130,5 +143,6 @@ module.exports = {
   updateJobStatus,
   updateJobAnalysis,
   getSettings,
-  saveSettings
+  saveSettings,
+  deleteJobs
 };

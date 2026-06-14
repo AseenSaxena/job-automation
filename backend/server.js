@@ -132,6 +132,20 @@ app.get('/api/jobs', async (req, res) => {
   }
 });
 
+// DELETE /api/jobs
+app.delete('/api/jobs', async (req, res) => {
+  const { ids } = req.body;
+  if (!Array.isArray(ids) || ids.length === 0) {
+    return res.status(400).json({ error: 'Invalid or empty job IDs array.' });
+  }
+  try {
+    await db.deleteJobs(ids);
+    res.json({ success: true, message: `Successfully deleted ${ids.length} jobs.` });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // PATCH /api/jobs/:id
 app.patch('/api/jobs/:id', async (req, res) => {
   const { id } = req.params;

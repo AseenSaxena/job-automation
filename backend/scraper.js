@@ -269,6 +269,33 @@ async function scrapeLinkedInJobs(keywords, location, experience, maxJobs = 15, 
         '.job-card-list__metadata-item', 
         '.job-card-container__metadata'
       ];
+      for (const s of locationSelectors) {
+        const el = card.locator(s);
+        if (await el.count() > 0) {
+          jobLocation = (await el.first().innerText()).trim();
+          if (jobLocation) break;
+        }
+      }
+
+      // 5. Get Posted Date (from LinkedIn card)
+      let postedDate = '';
+      const dateSelectors = [
+        'time.job-search-card__listdate',
+        '.job-search-card__listdate',
+        '.job-card-container__listed-time',
+        '.job-card-list__footer-item',
+        'time'
+      ];
+      for (const s of dateSelectors) {
+        const el = card.locator(s);
+        if (await el.count() > 0) {
+          const text = (await el.first().innerText()).trim();
+          if (text) {
+            postedDate = text;
+            break;
+          }
+        }
+      }
 
       if (!title || !company) continue;
 
@@ -280,7 +307,7 @@ async function scrapeLinkedInJobs(keywords, location, experience, maxJobs = 15, 
         company,
         location: jobLocation || location,
         link: cleanLink,
-        posted_date: new Date().toLocaleDateString()
+        posted_date: postedDate || new Date().toLocaleDateString()
       });
     } catch (err) {
       // Skip invalid cards
@@ -327,6 +354,77 @@ async function scrapeLinkedInJobs(keywords, location, experience, maxJobs = 15, 
 
       job.description = description.trim() || 'Description not found or required login wrapper.';
       
+      // Extract experience/seniority level from the page criteria
+      let experienceLevel = '';
+      try {
+        const criteriaItems = await page.locator('.description__job-criteria-item').all();
+        for (const item of criteriaItems) {
+          const text = await item.innerText();
+          if (text.toLowerCase().includes('seniority level')) {
+            const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+            if (lines.length > 1) {
+              experienceLevel = lines[1];
+              break;
+            }
+          }
+        }
+        if (!experienceLevel) {
+          const authCriteria = await page.locator('.job-details-jobs-description-header__job-criteria-item, .jobs-description-details__list-item').all();
+          for (const item of authCriteria) {
+            const text = await item.innerText();
+            if (text.toLowerCase().includes('seniority') || text.toLowerCase().includes('experience')) {
+              experienceLevel = text.replace(/Seniority level|Seniority Level|Seniority/gi, '').trim();
+              experienceLevel = experienceLevel.split('\n')[0].trim();
+              break;
+            }
+          }
+        }
+      } catch (critErr) {
+        // Ignore
+      }
+
+      // Regex fallback from description
+      let expYears = '';
+      if (job.description) {
+        const match = job.description.match(/(\d+\+?\s*(?:to|-)\s*\d*\+?\s*years?\s*(?:of\s*)?experience)/i) || 
+                      job.description.match(/(\d+\+?\s*years?\s*(?:of\s*)?experience)/i) || 
+                      job.description.match(/(\d+\+?\s*yrs?\s*(?:of\s*)?experience)/i);
+        if (match) {
+          expYears = match[1].trim();
+        }
+      }
+
+      let finalExperience = '';
+      if (experienceLevel && expYears) {
+        finalExperience = `${experienceLevel} (${expYears})`;
+      } else {
+        finalExperience = experienceLevel || expYears || 'Not Specified';
+      }
+      job.experience = finalExperience;
+
+      // Try to parse posted date from detail page if it's the scraped date default
+      if (job.posted_date && job.posted_date.includes('/')) {
+        try {
+          const detailDateSelectors = [
+            '.posted-time-ago__text',
+            '.jobs-unified-top-card__posted-date',
+            'span.jobs-unified-top-card__posted-date'
+          ];
+          for (const s of detailDateSelectors) {
+            const el = page.locator(s);
+            if (await el.count() > 0) {
+              const text = (await el.first().innerText()).trim();
+              if (text && (text.toLowerCase().includes('ago') || text.toLowerCase().includes('posted') || text.toLowerCase().includes('listed'))) {
+                job.posted_date = text;
+                break;
+              }
+            }
+          }
+        } catch (e) {
+          // Ignore
+        }
+      }
+
       // Save job to db
       await db.saveJob(job);
       newJobsSaved++;
