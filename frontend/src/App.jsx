@@ -80,9 +80,117 @@ function App() {
   const [selectedPortals, setSelectedPortals] = useState(['linkedin']);
   const [portalFilter, setPortalFilter] = useState('all');
 
+  // ── User auth state ────────────────────────────────────────────────────────
+  const [currentUser, setCurrentUser] = useState(null);
+  const [authToken, setAuthToken] = useState(null);
+  const [authView, setAuthView] = useState('login');   // 'login' | 'register'
+  const [authLoading, setAuthLoading] = useState(false);
+  const [authError, setAuthError] = useState('');
+  const [authInitDone, setAuthInitDone] = useState(false);
+  // Form fields
+  const [authName, setAuthName] = useState('');
+  const [authEmail, setAuthEmail] = useState('');
+  const [authPassword, setAuthPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  // ────────────────────────────────────────────────────────────────────────────
+
   useEffect(() => {
     setSelectedJobIds([]);
   }, [statusFilter, scoreFilter, dateFilter, sortBy, portalFilter]);
+
+  // ── Rehydrate auth from localStorage on first load ─────────────────────────
+  useEffect(() => {
+    const savedToken = localStorage.getItem('jobbot_token');
+    const savedUser  = localStorage.getItem('jobbot_user');
+    if (savedToken && savedUser) {
+      // Validate token is still good
+      fetch(`${API_URL}/auth/me`, { headers: { Authorization: `Bearer ${savedToken}` } })
+        .then(r => r.json())
+        .then(data => {
+          if (data.success) {
+            setAuthToken(savedToken);
+            setCurrentUser(data.user);
+          } else {
+            localStorage.removeItem('jobbot_token');
+            localStorage.removeItem('jobbot_user');
+          }
+        })
+        .catch(() => {})
+        .finally(() => setAuthInitDone(true));
+    } else {
+      setAuthInitDone(true);
+    }
+  }, []);
+  // ────────────────────────────────────────────────────────────────────────────
+
+  // \u2500\u2500 Auth handlers \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+  const handleRegister = async (e) => {
+    e.preventDefault();
+    setAuthError('');
+    setAuthLoading(true);
+    try {
+      const res = await fetch(`http://localhost:3001/api/auth/register`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: authName, email: authEmail, password: authPassword })
+      });
+      const data = await res.json();
+      if (data.success) {
+        localStorage.setItem('jobbot_token', data.token);
+        localStorage.setItem('jobbot_user', JSON.stringify(data.user));
+        setAuthToken(data.token);
+        setCurrentUser(data.user);
+        setAuthName(''); setAuthEmail(''); setAuthPassword('');
+      } else {
+        setAuthError(data.error || 'Registration failed.');
+      }
+    } catch {
+      setAuthError('Network error. Is the backend running?');
+    } finally {
+      setAuthLoading(false);
+    }
+  };
+
+  const handleLogin = async (e) => {
+    e.preventDefault();
+    setAuthError('');
+    setAuthLoading(true);
+    try {
+      const res = await fetch(`http://localhost:3001/api/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: authEmail, password: authPassword })
+      });
+      const data = await res.json();
+      if (data.success) {
+        localStorage.setItem('jobbot_token', data.token);
+        localStorage.setItem('jobbot_user', JSON.stringify(data.user));
+        setAuthToken(data.token);
+        setCurrentUser(data.user);
+        setAuthEmail(''); setAuthPassword('');
+      } else {
+        setAuthError(data.error || 'Login failed.');
+      }
+    } catch {
+      setAuthError('Network error. Is the backend running?');
+    } finally {
+      setAuthLoading(false);
+    }
+  };
+
+  const handleLogout = () => {
+    localStorage.removeItem('jobbot_token');
+    localStorage.removeItem('jobbot_user');
+    setAuthToken(null);
+    setCurrentUser(null);
+    setAuthView('login');
+    setAuthName('');
+    setAuthEmail('');
+    setAuthPassword('');
+    setAuthError('');
+    setShowPassword(false);
+  };
+  // \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
 
   const handleTabClick = (tab) => {
     setCurrentTab(tab);
@@ -450,6 +558,128 @@ function App() {
     highMatches: jobs.filter(j => j.match_score >= 80).length
   };
 
+  // ── Auth Gate ─────────────────────────────────────────────────────────
+  if (!authInitDone) {
+    return (
+      <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--bg-main)' }}>
+        <div style={{ textAlign: 'center', color: 'var(--text-secondary)' }}>
+          <div style={{ fontSize: '2rem', marginBottom: '1rem', animation: 'spin 1s linear infinite' }}>⟳</div>
+          Loading...
+        </div>
+      </div>
+    );
+  }
+
+  if (!currentUser) {
+    const isRegister = authView === 'register';
+    return (
+      <div style={{
+        minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center',
+        background: 'var(--bg-main)', padding: '1rem', fontFamily: 'Outfit, sans-serif'
+      }}>
+        <div style={{ width: '100%', maxWidth: '420px' }}>
+          {/* Logo */}
+          <div style={{ textAlign: 'center', marginBottom: '2rem' }}>
+            <div style={{
+              width: '60px', height: '60px', background: 'linear-gradient(135deg, #6366f1, #a855f7)',
+              borderRadius: '16px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+              fontSize: '1.75rem', marginBottom: '1rem', boxShadow: '0 0 30px rgba(99,102,241,0.4)'
+            }}>J</div>
+            <h1 style={{ fontSize: '1.75rem', fontWeight: 700, margin: 0 }}>JobBot AI</h1>
+            <p style={{ color: 'var(--text-secondary)', marginTop: '0.4rem', fontSize: '0.9rem' }}>
+              {isRegister ? 'Create your account to get started' : 'Sign in to your account'}
+            </p>
+          </div>
+
+          {/* Card */}
+          <div className="glass-panel" style={{ padding: '2rem', borderRadius: '16px' }}>
+            <form onSubmit={isRegister ? handleRegister : handleLogin} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+              {isRegister && (
+                <div className="form-group" style={{ margin: 0 }}>
+                  <label htmlFor="auth-name">Full Name</label>
+                  <input
+                    id="auth-name" type="text" placeholder="John Doe"
+                    value={authName} onChange={e => setAuthName(e.target.value)}
+                    required autoFocus
+                  />
+                </div>
+              )}
+              <div className="form-group" style={{ margin: 0 }}>
+                <label htmlFor="auth-email">Email Address</label>
+                <input
+                  id="auth-email" type="email" placeholder="you@example.com"
+                  value={authEmail} onChange={e => setAuthEmail(e.target.value)}
+                  required autoFocus={!isRegister}
+                />
+              </div>
+              <div className="form-group" style={{ margin: 0 }}>
+                <label htmlFor="auth-password">Password</label>
+                <div style={{ position: 'relative', display: 'block', width: '100%' }}>
+                  <input
+                    id="auth-password"
+                    type={showPassword ? 'text' : 'password'}
+                    placeholder={isRegister ? 'At least 6 characters' : 'Enter your password'}
+                    value={authPassword}
+                    onChange={e => setAuthPassword(e.target.value)}
+                    required
+                    style={{ width: '100%', boxSizing: 'border-box', paddingRight: '3rem' }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(p => !p)}
+                    style={{
+                      position: 'absolute', right: '0.9rem', top: '50%', transform: 'translateY(-50%)',
+                      background: 'none', border: 'none', cursor: 'pointer', zIndex: 2,
+                      color: 'var(--text-secondary)', fontSize: '1rem', padding: '0',
+                      lineHeight: 1, display: 'flex', alignItems: 'center'
+                    }}
+                    title={showPassword ? 'Hide password' : 'Show password'}
+                    aria-label={showPassword ? 'Hide password' : 'Show password'}
+                  >
+                    {showPassword ? '🙈' : '👁️'}
+                  </button>
+                </div>
+              </div>
+
+              {authError && (
+                <div style={{ background: 'rgba(239,68,68,0.12)', border: '1px solid rgba(239,68,68,0.3)', borderRadius: '8px', padding: '0.6rem 1rem', fontSize: '0.85rem', color: '#f87171' }}>
+                  {authError}
+                </div>
+              )}
+
+              <button
+                type="submit"
+                className="btn btn-primary"
+                disabled={authLoading}
+                style={{ marginTop: '0.5rem', padding: '0.85rem', fontSize: '1rem', justifyContent: 'center' }}
+              >
+                {authLoading ? '⏳ Please wait...' : isRegister ? '🚀 Create Account' : '🔐 Sign In'}
+              </button>
+            </form>
+
+            <div style={{ textAlign: 'center', marginTop: '1.5rem', fontSize: '0.875rem', color: 'var(--text-secondary)' }}>
+              {isRegister ? 'Already have an account?' : "Don't have an account?"}{' '}
+              <span
+                onClick={() => {
+                  setAuthView(isRegister ? 'login' : 'register');
+                  setAuthError('');
+                  setAuthName('');
+                  setAuthEmail('');
+                  setAuthPassword('');
+                  setShowPassword(false);
+                }}
+                style={{ color: '#a78bfa', cursor: 'pointer', fontWeight: 600 }}
+              >
+                {isRegister ? 'Sign In' : 'Create Account'}
+              </span>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+  // ────────────────────────────────────────────────────────────────────────────
+
   return (
     <div className="app-container">
       {/* Mobile Header */}
@@ -504,14 +734,39 @@ function App() {
           </nav>
         </div>
 
-        <div className="user-status">
-          <div className={`status-indicator ${Object.values(loginStatus).filter(Boolean).length > 0 ? 'online' : 'offline'}`}></div>
-          <div>
-            <div style={{ fontSize: '0.85rem', fontWeight: 600 }}>Portal Sync Status</div>
-            <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
-              {Object.values(loginStatus).filter(Boolean).length} / 5 Active
+        <div className="user-status" style={{ flexDirection: 'column', gap: '0.75rem', alignItems: 'stretch' }}>
+          {/* Logged-in user card */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+            <div style={{
+              width: '36px', height: '36px', borderRadius: '50%',
+              background: 'linear-gradient(135deg, #6366f1, #a855f7)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              fontWeight: 700, fontSize: '0.95rem', color: '#fff', flexShrink: 0
+            }}>
+              {currentUser.name.charAt(0).toUpperCase()}
+            </div>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontSize: '0.85rem', fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{currentUser.name}</div>
+              <div style={{ fontSize: '0.7rem', color: 'var(--text-secondary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{currentUser.email}</div>
             </div>
           </div>
+
+          {/* Portal sync row */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <div className={`status-indicator ${Object.values(loginStatus).filter(Boolean).length > 0 ? 'online' : 'offline'}`}></div>
+            <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
+              {Object.values(loginStatus).filter(Boolean).length} / 5 Portals Active
+            </span>
+          </div>
+
+          {/* Logout button */}
+          <button
+            className="btn"
+            onClick={handleLogout}
+            style={{ width: '100%', justifyContent: 'center', padding: '0.45rem', fontSize: '0.8rem', opacity: 0.8 }}
+          >
+            ← Logout
+          </button>
         </div>
       </aside>
 

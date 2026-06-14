@@ -7,6 +7,7 @@ const multer = require('multer');
 const { PDFParse } = require('pdf-parse');
 
 const db = require('./db');
+const auth = require('./auth');
 const upload = multer({ storage: multer.memoryStorage() });
 const scraper = require('./scraper');
 const ai = require('./ai');
@@ -61,6 +62,52 @@ app.get('/api/logs/stream', (req, res) => {
     sseClients.delete(res);
   });
 });
+
+// ─── User Authentication Routes ────────────────────────────────────────────
+
+// POST /api/auth/register
+app.post('/api/auth/register', async (req, res) => {
+  const { name, email, password } = req.body;
+  if (!name || !email || !password) {
+    return res.status(400).json({ error: 'Name, email, and password are required.' });
+  }
+  if (password.length < 6) {
+    return res.status(400).json({ error: 'Password must be at least 6 characters.' });
+  }
+  try {
+    const { user, token } = await auth.register(name, email, password);
+    res.json({ success: true, user, token });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// POST /api/auth/login
+app.post('/api/auth/login', async (req, res) => {
+  const { email, password } = req.body;
+  if (!email || !password) {
+    return res.status(400).json({ error: 'Email and password are required.' });
+  }
+  try {
+    const { user, token } = await auth.login(email, password);
+    res.json({ success: true, user, token });
+  } catch (err) {
+    res.status(401).json({ error: err.message });
+  }
+});
+
+// GET /api/auth/me  (validate token & return profile)
+app.get('/api/auth/me', auth.requireAuth, async (req, res) => {
+  try {
+    const user = await auth.getUser(req.userId);
+    if (!user) return res.status(404).json({ error: 'User not found.' });
+    res.json({ success: true, user });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ────────────────────────────────────────────────────────────────────────────
 
 // GET /api/login-status
 app.get('/api/login-status', (req, res) => {
@@ -155,10 +202,43 @@ app.post('/api/scrape', async (req, res) => {
       }
     }
     broadcastLog('Scraping batch completed successfully!');
+
+    // ── Auto Match Scoring ──────────────────────────────────────────────────
+    const resume = settings.resume || '';
+    if (!resume || resume.trim().length === 0) {
+      broadcastLog('⚠️  Auto-match skipped: No resume configured. Upload a resume in Settings to enable auto-scoring.');
+    } else {
+      broadcastLog('🤖 Starting auto match scoring for new entries...');
+      const database = await db.getDb();
+      const unscored = await database.all('SELECT id, title, company FROM jobs WHERE match_score IS NULL');
+      
+      if (unscored.length === 0) {
+        broadcastLog('✓ All jobs already scored — nothing new to analyze.');
+      } else {
+        broadcastLog(`📊 Found ${unscored.length} unscored job(s). Analyzing...`);
+        let successCount = 0;
+        let failCount = 0;
+        
+        for (const job of unscored) {
+          try {
+            await ai.analyzeJob(job.id);
+            successCount++;
+            broadcastLog(`✓ [${successCount}/${unscored.length}] Scored: "${job.title}" at ${job.company}`);
+          } catch (analyzeErr) {
+            failCount++;
+            broadcastLog(`✗ Failed to score "${job.title}": ${analyzeErr.message}`);
+          }
+        }
+        broadcastLog(`🎯 Auto-scoring complete: ${successCount} scored, ${failCount} failed.`);
+      }
+    }
+    // ────────────────────────────────────────────────────────────────────────
+
   } catch (err) {
     broadcastLog(`SCRAPER FAILURE: ${err.message}`);
   }
 });
+
 
 // GET /api/jobs
 app.get('/api/jobs', async (req, res) => {
